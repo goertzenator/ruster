@@ -1,10 +1,13 @@
 [package]
-
 name = "ruster"
 version = "0.0.1"
 authors = ["Daniel Goertzen <daniel.goertzen@gmail.com>"]
-build = "build.rs"
+description = "Create Erlang NIF modules in Rust using a high level Rustic API."
+#documentation = "http://goertzenator.github.io/ruster/ruster/index.html"
+repository = "https://github.com/goertzenator/ruster"
+license = "MIT/Apache-2.0"
+keywords = ["FFI", "Erlang", "NIF"]
 
 [dependencies]
-
+ruster_unsafe = "0.1"
 libc = "0.1"
