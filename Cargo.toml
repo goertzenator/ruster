@@ -9,5 +9,9 @@ license = "MIT/Apache-2.0"
 keywords = ["FFI", "Erlang", "NIF"]
 
 [dependencies]
-ruster_unsafe = "0.1"
+#ruster_unsafe = "0.1"
 libc = "0.1"
+
+[dependencies.ruster_unsafe]
+path = "/home/goertzen/ruster_unsafe"
+
