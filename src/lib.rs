@@ -1,3 +1,130 @@
+/*!
+
+High level Rust bindings to the [Erlang NIF API](http://www.erlang.org/doc/man/erl_nif.html).
+
+
+# Overview
+
+Ruster provides high level bindings to the [Erlang NIF API](http://www.erlang.org/doc/man/erl_nif.html).  It
+provides various wrappers to make things behave more Rustic, and it applies Rust's lifetime system to prevent
+errors that can be easily made in C NIFs. 
+
+These bindings depend and build upon the crate [Ruster Unsafe](http://goertzenator.github.io/ruster_unsafe/ruster_unsafe/index.html).
+
+# For the Impatient
+
+Compile the following in a crate as a dynlib and you will have a functioning NIF module:
+
+```
+#[macro_use]
+extern crate ruster;
+
+use ruster::*;
+use std::result::Result;
+
+// Build NIF function table and nif_init functions.
+nif_init!(b"ruster_test\0", None, None, None, None,
+  nif!(b"just_123\0", 0, just_123_wrapper)
+  );
+
+// Wrapper to present our safe ruster NIF as an unsafe "C" NIF.
+unsafe_wrapper!(just_123_wrapper, just_123);
+
+// Our NIF function.  Some key features:
+//  - Environment is protected from use outside this NIF by being a reference.
+//  - Terms are protected from use outside this NIF by holding a Phantom reference to the Environment.
+//  - Returns a Result<>.  An error result will cause enif_make_badarg() to be passed to the caller.
+fn just_123<'a>(env:&'a Env, _args:&[Term<'a>]) -> Result<Term<'a>,NifError> {
+
+	//  Convert 123 to term and return as result.
+	//  Erlang supported types have Encodable and Decodable traits.
+    Ok(123.to_term(env))
+
+}
+```
+
+# Env/Term basics
+
+All NIF terms must be associated with an environment, and terms must not be used once their associated
+environment has gone out of scope.  To enforce this association, the `Term` type holds a [PhantomData](https://doc.rust-lang.org/std/marker/struct.PhantomData.html)
+reference to its environment.  A consequence of this is explicit lifetime markup in various places, for example:
+
+```
+fn mynif<'a>(env:&'a Env, args:&[Term<'a>]) -> Result<Term<'a>,NifError> { ...
+```
+The markup here states that the `Term`s in the `args` slice are associated with `env`, and that the returned
+result must also be associated with `env`.  A bit flowery, but it lets the compiler prevent us from breaking
+rules that lead to emulator crashes.
+
+The other basic protection mechanism is the scoping of Env in NIF function.  Process dependent environments
+are only valid for the duration of a NIF call, and this is enforced in Ruster by providing the environment
+as a reference to `Env`.  Any attempt to "save" the environment for use after the NIF call has returned will
+be a compile error.
+
+
+# Encodable and Decodable traits
+
+Conversions between NIF terms and Erlang types are done with implementations
+of the Encodable and Decodable traits:
+
+```
+pub trait Encodable {
+	fn to_term<'a>(&self, env:&'a Env) -> Term<'a>;
+}
+
+pub trait Decodable {
+	fn from_term(env:& Env, term:Term) -> Result<Self, NifError>;
+}
+```
+
+`to_term` creates a new term in the given environment with a phantom reference to that environment.
+`from_term` converts a term to a Rust type.  `from_term` may fail if the underlying type didn't match
+the requested target type, hence the return type is `Result`.  Some examples and error handling strategies:
+
+```
+(write me)
+```
+
+# Process Independent Environments and Send
+
+The Erlang NIF API also allows you to create additional environments that can live beyond the context of a
+NIF call.  These are represented by the type `OwnedEnv`.  An `Env` reference can be acquired with the `get_static`
+method.  For example:
+
+```
+let oe = OwnedEnv::new();
+let env = unsafe{ oe.get_static() };
+let term = 123.to_term(env);
+...
+```
+
+Oh dear.. static? unsafe?  Unfortuneately the safety model for NIF functions breaks down when applied to process 
+independent environments (because of Send, see below).  To turn the safties off, the method `get_static()` returns
+a `'static` reference to an `Env`.  Any terms created with this static Env reference will also be static, and will
+be permitted to outlast the environment.  You must manually ensure that the rules are followed; the compiler will
+not catch your mistakes here.  To remind you of this the `get_static()` method is marked `unsafe`.
+
+
+## Safer PIEs?
+
+Creating safer PIEs is an area of ongoing investigation.  I you have the answer, please tell me!  I investigated
+some monad-like constructs, but could not make things fundamentally safer than the system above.
+
+# Static Atoms
+
+
+
+
+
+# Resources
+
+# Threads
+
+Use of `Env` is not threadsafe, hence it lacks the `Sync` trait.
+
+!*/
+
+
 
 //#[macro_use]
 extern crate ruster_unsafe;
@@ -19,7 +146,7 @@ use libc::c_double;
 
 
 /*
-Environment and Term constraints
+Env and Term constraints
 
 1. Terms are associated with an environment and are only valid while the environment is valid.  When manipulating
    terms (encoding or decoding) the environment must always be provided.
@@ -34,17 +161,17 @@ Environment and Term constraints
 5. Terms associated with process independent environment are valid until enif_free_env(), enif_send(), or
    enif_clear_env() are called on the environment.
 
-6. Environments and terms are not thread-safe and must be protected from concurrent access.
+6. Envs and terms are not thread-safe and must be protected from concurrent access.
 */
 
 /*
 
-Rust design of Terms and Environment
+Rust design of Terms and Env
 
-Environment struct can stay as-is
+Env struct can stay as-is
 
-Term should have a PhantomData reference to an Environment
-	- This prevents usage of Terms outside and Environment.
+Term should have a PhantomData reference to an Env
+	- This prevents usage of Terms outside and Env.
 	- Terms that happen to be atoms are overconstrained.
 		- Atoms should be part of a static environment
 		- Provide unsafe conversion of bound env term to static env term.
@@ -52,7 +179,7 @@ Term should have a PhantomData reference to an Environment
 
 	- For process independent environments we need to produce a struct with...
 		- Drop trait that invokes enif_free_env().
-		- *not* Deref.. Environments are opaque and never dereferenced.
+		- *not* Deref.. Envs are opaque and never dereferenced.
 		- but... Deref: Dereferences and provides *reference* to *target*.
 		   - This inuitively seems wrong.  Grates against C instincts.
 		   - But if you think as references in a C++ sense, it is ok.
@@ -62,62 +189,115 @@ Term should have a PhantomData reference to an Environment
 */
 
 
-pub use ruster_unsafe::ErlNifEnv as Environment;
+pub use ruster_unsafe::ErlNifEnv as Env;
 pub use ruster_unsafe::ErlNifPid as Pid;
-
-
-pub struct EnvironmentPtr {
-	env: *const Environment
-}
-
-unsafe impl Send for EnvironmentPtr {}
-
-impl EnvironmentPtr {
-	pub fn new() -> EnvironmentPtr {
-		EnvironmentPtr{ env: unsafe{ruster_unsafe::enif_alloc_env()}}
-	}
-}
-
-impl Drop for EnvironmentPtr {
-	 fn drop(&mut self) {
-        println!("Dropping env");
-        unsafe{ ruster_unsafe::enif_free_env(self.env) };
-    }
-}
-
-// impl AsMut<Environment> for EnvironmentPtr {
-//     fn as_mut(&mut self) -> &mut Environment {
-//     	unsafe{transmute(self.env)}
-//     }
-// }
-
-
-impl Deref for EnvironmentPtr {
-	type Target = Environment;
-	fn deref<'a>(&'a self) -> &'a Self::Target {
-		unsafe{transmute(self.env)}
-	}
-}
-
-// impl DerefMut for EnvironmentPtr {
-// 	fn deref_mut<'a>(&'a mut self) -> &'a mut Self::Target {
-// 		unsafe{transmute(self.env)}
-// 	}
-// }
 
 // pub struct Term {
 // 	term: ruster_unsafe::ERL_NIF_TERM
 // }
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
-// pub struct Term<'a> {
-// 	term: ruster_unsafe::ERL_NIF_TERM,
-// 	phantom: std::marker::PhantomData<&'a Environment>  // Created term ends up borrowing env rendering it unavailable for anything else?
-// }
 pub struct Term<'a> {
 	term: ruster_unsafe::ERL_NIF_TERM,
-	phantom: std::marker::PhantomData<&'a ()>
+	phantom: std::marker::PhantomData<&'a Env>  // Created term ends up borrowing env rendering it unavailable for anything else?
 }
+// pub struct Term<'a> {
+// 	term: ruster_unsafe::ERL_NIF_TERM,
+// 	phantom: std::marker::PhantomData<&'a ()>
+// }
+
+
+
+struct EnvPtr {
+	env: *mut Env
+}
+
+impl EnvPtr {
+	fn new() -> EnvPtr {
+		EnvPtr{ env: unsafe{ruster_unsafe::enif_alloc_env()}}
+	}
+	fn clear(&self) {
+		unsafe { enif_clear_env(self.env); }
+	}
+}
+
+impl Drop for EnvPtr {
+	 fn drop(&mut self) {
+        println!("Dropping env ptr");
+        unsafe{ ruster_unsafe::enif_free_env(self.env) };
+    }
+}
+
+
+pub struct OwnedEnv {
+	ptr: EnvPtr
+}
+impl OwnedEnv {
+	pub fn new() -> OwnedEnv {
+		OwnedEnv{ ptr: EnvPtr::new() }
+	}
+	pub unsafe fn get_static(&self) -> &'static Env {
+		unsafe {&*self.ptr.env}		
+	}
+}
+
+pub struct InvalidEnv {
+	ptr: EnvPtr
+}
+impl InvalidEnv {
+	pub fn clear(self) -> OwnedEnv {
+		self.ptr.clear();
+		OwnedEnv{ptr: self.ptr}
+	}
+}
+
+
+
+pub enum SendResult {
+	Ok(InvalidEnv),
+	Err(OwnedEnv)
+}
+
+impl SendResult {
+	pub fn unwrap(self) -> InvalidEnv {
+		match self {
+			SendResult::Ok(env) => env,
+			SendResult::Err(_) => panic!("SendResult unwrap failed")
+		}
+	}
+}
+
+
+pub unsafe fn send_from_thread(to_pid:&Pid, msg_env:OwnedEnv, msg:Term<'static>) -> SendResult {
+	unsafe {
+		match enif_send(std::ptr::null_mut(), &*to_pid, msg_env.ptr.env, msg.term) {
+			0 => SendResult::Err(msg_env),
+			_ => SendResult::Ok(InvalidEnv{ptr: msg_env.ptr})
+		}
+	}
+}
+
+// impl AsMut<Env> for EnvPtr {
+//     fn as_mut(&mut self) -> &mut Env {
+//     	unsafe{transmute(self.env)}
+//     }
+// }
+
+
+// impl Deref for EnvPtr {
+// 	type Target = Env;
+// 	fn deref<'a>(&'a self) -> &'a Self::Target {
+// 		unsafe{transmute(self.env)}
+// 	}
+// }
+
+// impl DerefMut for EnvPtr {
+// 	fn deref_mut<'a>(&'a mut self) -> &'a mut Self::Target {
+// 		unsafe{transmute(self.env)}
+// 	}
+// }
+
+
 
 
 //	assert_eq!(std::mem::size_of::<Term>(), std::mem::size_of::<ERL_NIF_TERM>());
@@ -133,7 +313,7 @@ pub struct Term<'a> {
 // /// Return term as an environment-less atom term.
 // ///
 // /// The caller must assure that the input term in fact represents and atom.
-// pub fn term_to_atom(env:&mut Environment, term:Term) -> Option<Term<'static>> {
+// pub fn term_to_atom(env:&mut Env, term:Term) -> Option<Term<'static>> {
 // 	match unsafe{enif_is_atom(transmute(env), transmute(term))} {
 // 		0 => None,
 // 		_ => Some(unsafe_term_to_atom(term)),
@@ -142,51 +322,29 @@ pub struct Term<'a> {
 
 
 /// Get pid of current process.
-pub fn selfpid(env:&Environment) -> Pid {
+pub unsafe fn selfpid(env:&Env) -> Pid {
 	unsafe {
 		let mut pid:Pid = std::mem::uninitialized();
-		enif_self(env, &mut pid);
+		enif_self(transmute(env), &mut pid);
 		pid		
 	}
 }
 
-/// Send message and free sending environment.
-pub fn send_from_thread(pid:&Pid, msg_env:EnvironmentPtr, msg:Term) {
-	send_from_thread_main(&pid, msg_env, msg);	
-}
-
-/// Send message and recycle environment (enif_clear_env())
-pub fn send_from_thread_recycle(pid:&Pid, msg_env:EnvironmentPtr, msg:Term) -> EnvironmentPtr {
-	let msg_env2 = send_from_thread_main(&pid, msg_env, msg);	
-	unsafe {enif_clear_env(&*msg_env2);}
-	msg_env2
-}
-
-fn send_from_thread_main(pid:&Pid, msg_env:EnvironmentPtr, msg:Term) -> EnvironmentPtr {
-	unsafe {
-		enif_send(std::ptr::null(), pid, &*msg_env, transmute(msg));
-	}
-	msg_env
-}
-
-
-pub fn kill_ep(_msg_env:EnvironmentPtr) {}
-
 
 // /// Send message and free sending environment.
-// pub fn send_from_process(env:&Environment, pid:&Pid, msg_env:EnvironmentPtr, msg:Term) {
+// pub fn send_from_process(env:&Env, pid:&Pid, msg_env:EnvPtr, msg:Term) {
 // 	send_from_process_main(&env, &pid, msg_env, msg);	
 // }
 
 
 // /// Send message and recycle environment (enif_clear_env())
-// pub fn send_from_process_recycle(env:&Environment, pid:&Pid, msg_env:EnvironmentPtr, msg:Term) -> EnvironmentPtr {
+// pub fn send_from_process_recycle(env:&Env, pid:&Pid, msg_env:EnvPtr, msg:Term) -> EnvPtr {
 // 	let msg_env2 = send_from_process_main(&pid, msg_env, msg);	
 // 	unsafe {enif_clear_env(msg_env2);}
 // 	msg_env
 // }
 
-// fn send_from_process_main(env:&Environment, pid:&Pid, msg_env:EnvironmentPtr, msg:Term) -> EnvironmentPtr {
+// fn send_from_process_main(env:&Env, pid:&Pid, msg_env:EnvPtr, msg:Term) -> EnvPtr {
 // 	enif_send(env, &pid, &msg_env, msg);
 // 	msg_env
 // }
@@ -219,21 +377,21 @@ pub enum NifError {
 // }
 
 pub trait Encodable {
-	fn to_term<'a>(&self, env:&'a Environment) -> Term<'a>;
+	fn to_term<'a>(&self, env:&'a Env) -> Term<'a>;
 }
 
 pub trait Decodable {
-	fn from_term(env:& mut Environment, term:Term) -> Result<Self, NifError>;
+	fn from_term(env:& mut Env, term:Term) -> Result<Self, NifError>;
 }
 
 
 // impl Encodable for c_int {
-// 	fn to_term<'a>(&self, env:&'a mut Environment) -> Term<'a> {
+// 	fn to_term<'a>(&self, env:&'a mut Env) -> Term<'a> {
 // 		unsafe{ transmute(ruster_unsafe::enif_make_int(transmute(env), *self)) }
 // 	}
 // }
 // impl Decodable for c_int {
-// 	fn from_term(env:&Environment, term:Term) -> Result<Self, NifError> {
+// 	fn from_term(env:&Env, term:Term) -> Result<Self, NifError> {
 // 		unsafe {
 // 			let mut result: Self = 0;
 // 			match ruster_unsafe::enif_get_int(transmute(env), transmute(term), &mut result) {
@@ -248,7 +406,7 @@ pub trait Decodable {
 macro_rules! implement_simple_encodable {
 	($enctype:ty, $fun:path) => (
 		impl Encodable for $enctype {
-			fn to_term<'a>(&self, env:&'a Environment) -> Term<'a>{
+			fn to_term<'a>(&self, env:&'a Env) -> Term<'a>{
 				unsafe{ transmute($fun(transmute(env), *self)) }
 			}
 		}
@@ -259,7 +417,7 @@ macro_rules! implement_simple_decodable{
 	($dectype:ty, $fun:path) => (
 
 		impl Decodable for $dectype {
-			fn from_term(env:& mut Environment, term:Term) -> Result<Self, NifError> {
+			fn from_term(env:& mut Env, term:Term) -> Result<Self, NifError> {
 				unsafe {
 					let mut result: Self = std::mem::uninitialized();
 					match $fun(transmute(env), transmute(term), &mut result) {
@@ -299,7 +457,7 @@ implement_simple_transcodable!(u64, enif_make_uint64, enif_get_uint64);
 // //		impl<$($name:Decodable),*> Decodable for ($($name,)*) {
 // 		impl Decodable for ($($name,)*) {
 // //	        #[allow(non_snake_case)]
-// 			fn from_term(env:&Environment, term:Term) -> Result<Self, NifError> {
+// 			fn from_term(env:&Env, term:Term) -> Result<Self, NifError> {
 // 				unsafe {
 // 					let mut arity:c_int = std::mem::uninitialized();
 // 					let mut array:*const ruster_unsafe::ERL_NIF_TERM = std::mem::uninitialized();
@@ -344,7 +502,7 @@ implement_simple_transcodable!(u64, enif_make_uint64, enif_get_uint64);
 //                     return Ok(ret);
 
 // impl<T0: Decodable, T1: Decodable> Decodable for (T0,T1) {
-// 	fn from_term(env:& mut Environment, term:Term) -> Result<Self, NifError> {
+// 	fn from_term(env:& mut Env, term:Term) -> Result<Self, NifError> {
 // 		unsafe {
 // 			let arity:c_int = std::mem::uninitialized();
 // 			let array:*const ERL_NIF_TERM = std::mem::uninitialized();
@@ -429,7 +587,7 @@ implement_simple_transcodable!(u64, enif_make_uint64, enif_get_uint64);
 // }
 
 
-pub type RusterFnType<'a> = fn(env:&'a Environment, args:&[Term<'a>]) -> Result<Term<'a>,NifError>;
+pub type RusterFnType<'a> = fn(env:&'a Env, args:&[Term<'a>]) -> Result<Term<'a>,NifError>;
 //type blah_type = fn(blah:i32) -> i32;
 
 
