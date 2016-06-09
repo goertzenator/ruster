@@ -9,7 +9,7 @@ Ruster provides high level bindings to the [Erlang NIF API](http://www.erlang.or
 provides various wrappers to make things behave more Rustic, and it applies Rust's lifetime system to prevent
 errors that can be easily made in C NIFs. 
 
-These bindings depend and build upon the crate [Ruster Unsafe](http://goertzenator.github.io/ruster_unsafe/ruster_unsafe/index.html).
+These bindings depend and build upon the crate [Ruster Unsafe](http://goertzenator.github.io/erlang_nif_sys/erlang_nif_sys/index.html).
 
 # For the Impatient
 
@@ -127,14 +127,12 @@ Use of `Env` is not threadsafe, hence it lacks the `Sync` trait.
 
 
 //#[macro_use]
-extern crate ruster_unsafe;
+extern crate erlang_nif_sys;
 extern crate libc;
 
-use ruster_unsafe::*;
+use erlang_nif_sys::*;
 use std::mem::transmute;
-//use std::error;
 
-use std::ops::Deref;
 
 // use libc::c_int;
 use libc::c_uint;
@@ -189,91 +187,134 @@ Term should have a PhantomData reference to an Env
 */
 
 
-pub use ruster_unsafe::ErlNifEnv as Env;
-pub use ruster_unsafe::ErlNifPid as Pid;
+pub use erlang_nif_sys::ErlNifEnv as Env;
+pub use erlang_nif_sys::ErlNifPid as Pid;
+
+use std::result;
 
 // pub struct Term {
-// 	term: ruster_unsafe::ERL_NIF_TERM
+// 	term: erlang_nif_sys::ERL_NIF_TERM
 // }
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct Term<'a> {
-	term: ruster_unsafe::ERL_NIF_TERM,
+	term: erlang_nif_sys::ERL_NIF_TERM,
 	phantom: std::marker::PhantomData<&'a Env>  // Created term ends up borrowing env rendering it unavailable for anything else?
 }
 // pub struct Term<'a> {
-// 	term: ruster_unsafe::ERL_NIF_TERM,
+// 	term: erlang_nif_sys::ERL_NIF_TERM,
 // 	phantom: std::marker::PhantomData<&'a ()>
 // }
 
 
 
-struct EnvPtr {
+// // won't work because neither Drop and Unique are from this module.
+// pub impl Drop for Unique<Env> {
+// 	 fn drop(&mut self) {
+//         println!("Dropping env ptr");
+//         unsafe{ erlang_nif_sys::enif_free_env(self) };
+//     }	
+// }
+// pub impl Unique<Env> {
+// 	fn new() -> Unique<Env> {
+// 		Unique::<Env>::new(unsafe{erlang_nif_sys::enif_alloc_env()})
+//  	}
+// }
+
+
+#[derive(Debug)]
+pub struct UniqueEnv {
 	env: *mut Env
 }
 
-impl EnvPtr {
-	fn new() -> EnvPtr {
-		EnvPtr{ env: unsafe{ruster_unsafe::enif_alloc_env()}}
+impl UniqueEnv {
+	pub fn new() -> UniqueEnv {
+		UniqueEnv{ env: unsafe{erlang_nif_sys::enif_alloc_env()}}
 	}
-	fn clear(&self) {
+	pub fn clear(&self) {
 		unsafe { enif_clear_env(self.env); }
+	}
+
+	pub fn as_static(&self) -> &'static Env {
+		unsafe{ &*(self.env) }
 	}
 }
 
-impl Drop for EnvPtr {
+impl Drop for UniqueEnv {
 	 fn drop(&mut self) {
         println!("Dropping env ptr");
-        unsafe{ ruster_unsafe::enif_free_env(self.env) };
+        unsafe{ erlang_nif_sys::enif_free_env(self.env) };
     }
 }
 
-
-pub struct OwnedEnv {
-	ptr: EnvPtr
-}
-impl OwnedEnv {
-	pub fn new() -> OwnedEnv {
-		OwnedEnv{ ptr: EnvPtr::new() }
-	}
-	pub unsafe fn get_static(&self) -> &'static Env {
-		unsafe {&*self.ptr.env}		
+impl AsRef<Env> for UniqueEnv {
+	fn as_ref(&self) -> &Env {
+		unsafe{ &*(self.env) }
 	}
 }
 
+// impl std::ops::Deref for UniqueEnv {
+// 	type Target = Env;
+// 	fn deref<'a>(&'a self) -> &'a Self::Target {
+// 		unsafe{transmute(self.env)}
+// 	}
+// }
+
+// impl std::ops::DerefMut for EnvPtr {
+// 	fn deref_mut<'a>(&'a mut self) -> &'a mut Self::Target {
+// 		unsafe{transmute(self.env)}
+// 	}
+// }
+
+// pub struct Pie1 {
+// 	envptr: EnvPtr,
+// 	erlang_nif_sys::ERL_NIF_TERM
+// }
+
+// pub struct OwnedEnv {
+// 	ptr: EnvPtr
+// }
+// impl OwnedEnv {
+// 	pub fn new() -> OwnedEnv {
+// 		OwnedEnv{ ptr: EnvPtr::new() }
+// 	}
+// 	pub unsafe fn get_static(&self) -> &'static Env {
+// 		&*self.ptr.env
+// 	}
+// }
+
+#[derive(Debug)]
 pub struct InvalidEnv {
-	ptr: EnvPtr
+	env: UniqueEnv
 }
 impl InvalidEnv {
-	pub fn clear(self) -> OwnedEnv {
-		self.ptr.clear();
-		OwnedEnv{ptr: self.ptr}
+	pub fn clear(self) -> UniqueEnv {
+		self.env
 	}
 }
 
 
 
-pub enum SendResult {
-	Ok(InvalidEnv),
-	Err(OwnedEnv)
-}
+// pub enum SendResult {
+// 	Ok(InvalidEnv),
+// 	Err(OwnedEnv)
+// }
 
-impl SendResult {
-	pub fn unwrap(self) -> InvalidEnv {
-		match self {
-			SendResult::Ok(env) => env,
-			SendResult::Err(_) => panic!("SendResult unwrap failed")
-		}
-	}
-}
+// impl SendResult {
+// 	pub fn unwrap(self) -> InvalidEnv {
+// 		match self {
+// 			SendResult::Ok(env) => env,
+// 			SendResult::Err(_) => panic!("SendResult unwrap failed")
+// 		}
+// 	}
+// }
 
 
-pub unsafe fn send_from_thread(to_pid:&Pid, msg_env:OwnedEnv, msg:Term<'static>) -> SendResult {
-	unsafe {
-		match enif_send(std::ptr::null_mut(), &*to_pid, msg_env.ptr.env, msg.term) {
-			0 => SendResult::Err(msg_env),
-			_ => SendResult::Ok(InvalidEnv{ptr: msg_env.ptr})
-		}
+pub unsafe fn send_from_thread(to_pid:&Pid, msg_env:UniqueEnv, msg:Term<'static>) -> result::Result<InvalidEnv, UniqueEnv> {
+	
+	match enif_send(std::ptr::null_mut(), &*to_pid, msg_env.env, msg.term) {
+		0 => Err(msg_env),
+		_ => Ok(InvalidEnv{env: msg_env})
 	}
 }
 
@@ -284,45 +325,16 @@ pub unsafe fn send_from_thread(to_pid:&Pid, msg_env:OwnedEnv, msg:Term<'static>)
 // }
 
 
-// impl Deref for EnvPtr {
-// 	type Target = Env;
-// 	fn deref<'a>(&'a self) -> &'a Self::Target {
-// 		unsafe{transmute(self.env)}
-// 	}
-// }
-
-// impl DerefMut for EnvPtr {
-// 	fn deref_mut<'a>(&'a mut self) -> &'a mut Self::Target {
-// 		unsafe{transmute(self.env)}
-// 	}
-// }
 
 
 
 
-//	assert_eq!(std::mem::size_of::<Term>(), std::mem::size_of::<ERL_NIF_TERM>());
-
-
-// /// Return term as an environment-less atom term.
-// ///
-// /// The caller must assure that the input term in fact represents and atom.
-// pub fn unsafe_term_to_atom(term:Term) -> Term<'static> {
-// 	unsafe{transmute(term)}
-// }
-
-// /// Return term as an environment-less atom term.
-// ///
-// /// The caller must assure that the input term in fact represents and atom.
-// pub fn term_to_atom(env:&mut Env, term:Term) -> Option<Term<'static>> {
-// 	match unsafe{enif_is_atom(transmute(env), transmute(term))} {
-// 		0 => None,
-// 		_ => Some(unsafe_term_to_atom(term)),
-// 	}
-// }
 
 
 /// Get pid of current process.
-pub unsafe fn selfpid(env:&Env) -> Pid {
+/// Underlying nif implementation will provide an invalid PID if the
+/// provided environment is process independent.
+pub fn selfpid(env:&Env) -> Pid {
 	unsafe {
 		let mut pid:Pid = std::mem::uninitialized();
 		enif_self(transmute(env), &mut pid);
@@ -355,7 +367,7 @@ pub unsafe fn selfpid(env:&Env) -> Pid {
 
 
 #[derive(Debug, Copy, Clone)]
-pub enum NifError {
+pub enum Error {
 	Badarg,
 }
 
@@ -376,25 +388,68 @@ pub enum NifError {
 // 	}
 // }
 
+
+pub type Result<T> = result::Result<T, Error>;
+
+
+
 pub trait Encodable {
 	fn to_term<'a>(&self, env:&'a Env) -> Term<'a>;
 }
 
-pub trait Decodable {
-	fn from_term(env:& mut Env, term:Term) -> Result<Self, NifError>;
+pub trait Decodable: Sized {
+	fn from_term(env:& mut Env, term:Term) -> Result<Self>;
 }
+
+
+
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct Term<'a> {
+	term: erlang_nif_sys::ERL_NIF_TERM,
+	phantom: std::marker::PhantomData<&'a Env>  // Created term ends up borrowing env rendering it unavailable for anything else?
+}
+
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct Atom {
+	term: erlang_nif_sys::ERL_NIF_TERM,
+}
+
+//	assert_eq!(std::mem::size_of::<Term>(), std::mem::size_of::<ERL_NIF_TERM>());
+
+
+/// Return term as an environment-less atom term.
+///
+/// The caller must assure that the input term in fact represents and atom.
+fn unsafe_term_to_atom(term:Term) -> Term<'static> {
+	unsafe{transmute(term)}
+}
+
+/// Return term as an environment-less atom term.
+///
+/// The caller must assure that the input term in fact represents and atom.
+pub fn term_to_atom(env:&mut Env, term:Term) -> Option<Term<'static>> {
+	match unsafe{enif_is_atom(transmute(env), transmute(term))} {
+		0 => None,
+		_ => Some(unsafe_term_to_atom(term)),
+	}
+}
+
 
 
 // impl Encodable for c_int {
 // 	fn to_term<'a>(&self, env:&'a mut Env) -> Term<'a> {
-// 		unsafe{ transmute(ruster_unsafe::enif_make_int(transmute(env), *self)) }
+// 		unsafe{ transmute(erlang_nif_sys::enif_make_int(transmute(env), *self)) }
 // 	}
 // }
 // impl Decodable for c_int {
 // 	fn from_term(env:&Env, term:Term) -> Result<Self, NifError> {
 // 		unsafe {
 // 			let mut result: Self = 0;
-// 			match ruster_unsafe::enif_get_int(transmute(env), transmute(term), &mut result) {
+// 			match erlang_nif_sys::enif_get_int(transmute(env), transmute(term), &mut result) {
 // 				0 => Err(NifError::Badarg),
 // 				_ => Ok(result),
 // 			}
@@ -417,11 +472,11 @@ macro_rules! implement_simple_decodable{
 	($dectype:ty, $fun:path) => (
 
 		impl Decodable for $dectype {
-			fn from_term(env:& mut Env, term:Term) -> Result<Self, NifError> {
+			fn from_term(env:& mut Env, term:Term) -> Result<Self> {
 				unsafe {
 					let mut result: Self = std::mem::uninitialized();
 					match $fun(transmute(env), transmute(term), &mut result) {
-						0 => Err(NifError::Badarg),
+						0 => Err(Error::Badarg),
 						_ => Ok(result),
 					}
 				}
@@ -437,123 +492,110 @@ macro_rules! implement_simple_transcodable {
 	)
 }
 
-// implement_simple_encodable!(c_int, ruster_unsafe::enif_make_int);
-// implement_simple_decodable!(c_int, ruster_unsafe::enif_get_int);
+// implement_simple_encodable!(c_int, erlang_nif_sys::enif_make_int);
+// implement_simple_decodable!(c_int, erlang_nif_sys::enif_get_int);
 
 implement_simple_transcodable!(c_int, enif_make_int, enif_get_int);
 implement_simple_transcodable!(c_uint, enif_make_uint, enif_get_uint);
 implement_simple_transcodable!(c_double, enif_make_double, enif_get_double);
 implement_simple_transcodable!(i64, enif_make_int64, enif_get_int64);
 implement_simple_transcodable!(u64, enif_make_uint64, enif_get_uint64);
-// implement_simple_transcodable!(c_long, ruster_unsafe::enif_make_long, ruster_unsafe::enif_get_long);
-// implement_simple_transcodable!(c_ulong, ruster_unsafe::enif_make_ulong, ruster_unsafe::enif_get_ulong);
+// implement_simple_transcodable!(c_long, erlang_nif_sys::enif_make_long, erlang_nif_sys::enif_get_long);
+// implement_simple_transcodable!(c_ulong, erlang_nif_sys::enif_make_ulong, erlang_nif_sys::enif_get_ulong);
 
 
 // Tuple implementation
 
-// macro_rules! tuple {
-// 	() => ();
-// 	( $($name:ident,)+) => (
-// //		impl<$($name:Decodable),*> Decodable for ($($name,)*) {
-// 		impl Decodable for ($($name,)*) {
-// //	        #[allow(non_snake_case)]
-// 			fn from_term(env:&Env, term:Term) -> Result<Self, NifError> {
-// 				unsafe {
-// 					let mut arity:c_int = std::mem::uninitialized();
-// 					let mut array:*const ruster_unsafe::ERL_NIF_TERM = std::mem::uninitialized();
-// 					match enif_get_tuple(transmute(env), transmute(term), &arity, &array)
-// 				}
-// 				let ret = ($(try!(blah $name)))
+
+// Slice of Term
+
+impl<'b> Encodable for &'b[Term<'b>] {
+	fn to_term<'a>(&self, env:&'a Env) -> Term<'a> {
+		unsafe {
+			transmute(
+				enif_make_tuple_from_array(
+					transmute(env),
+					self.as_ptr() as *const ERL_NIF_TERM,
+					self.len() as c_uint)
+			)
+		}
+	}
+}
+
+impl<'b> Decodable for &'b[Term<'b>] {
+	fn from_term(env:& mut Env, term:Term) -> Result<Self> {
+		unsafe {
+			let mut arity:c_int = std::mem::uninitialized();
+			let mut array:*const erlang_nif_sys::ERL_NIF_TERM = std::mem::uninitialized();
+			match enif_get_tuple(transmute(env), transmute(term), &mut arity, &mut array) {
+				0 => Err(Error::Badarg),
+				_ => Ok(std::slice::from_raw_parts(array as *const Term, arity as usize)),
+			}
+		}
+	}
+}
 
 
-// 	        fn decode<D: Decoder>(d: &mut D) -> Result<($($name,)*), D::Error> {
-// 	            let len: uint = count_idents!($($name,)*);
-// 	            d.read_tuple(len, |d| {
-// 	                let mut i = 0;
-// 	                let ret = ($(try!(d.read_tuple_arg({ i+=1; i-1 },
-// 	                                                   |d| -> Result<$name,D::Error> {
-// 	                    Decodable::decode(d)
-// 	                })),)*);
-// 	                return Ok(ret);
-// 	            })
-// 	        }
-// 	    }
-// 	    impl<$($name:Encodable),*> Encodable for ($($name,)*) {
-// 	        #[allow(non_snake_case)]
-// 	        fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
-// 	            let ($(ref $name,)*) = *self;
-// 	            let mut n = 0;
-// 	            $(let $name = $name; n += 1;)*
-// 	            s.emit_tuple(n, |s| {
-// 	                let mut i = 0;
-// 	                $(try!(s.emit_tuple_arg({ i+=1; i-1 }, |s| $name.encode(s)));)*
-// 	                Ok(())
-// 	            })
-// 	        }
-// 	    }
-// 	    peel! { $($name,)* }
-// 		)
-// }
+// Arbitrary Tuples
 
-// let ret = ($(try!(d.read_tuple_arg({ i+=1; i-1 },
-//                                                        |d| -> Result<$name,D::Error> {
-//                         Decodable::decode(d)
-//                     })),)*);
-//                     return Ok(ret);
+impl<T0: Encodable, T1: Encodable> Encodable for (T0,T1) {
+	fn to_term<'a>(&self, env:&'a Env) -> Term<'a> {
+		let terms = [self.0.to_term(env), self.1.to_term(env)];
+		terms.as_ref().to_term(env)
+	}
+}
 
 // impl<T0: Decodable, T1: Decodable> Decodable for (T0,T1) {
-// 	fn from_term(env:& mut Env, term:Term) -> Result<Self, NifError> {
+
+// 	fn from_term(env:& mut Env, term:Term) -> Result<Self> {
+// 		let terms:&[Term] = try!(
+// 			from_term(env, term).
+// 			and_then(|sl| match sl.len() {2 => Ok(sl), _ => Err(Error::Badarg) }));
+
+// 		(
+// 			try!(from_term(env, terms[0])),
+// 			try!(from_term(env, terms[1])),
+// 		)
+// 	}
+// }
+
+
+
+// List Iterator
+
+// struct<'a> ListDecoder {
+// 	env: &'a Env,
+// 	tail: ERL_NIF_TERM,
+// }
+
+// impl ListDecoder {
+// 	fn new<'a>(env:&'a mut Env, term: Term<'a>) -> Result<ListDecoder<'a>> {
 // 		unsafe {
-// 			let arity:c_int = std::mem::uninitialized();
-// 			let array:*const ERL_NIF_TERM = std::mem::uninitialized();
-// 			match enif_get_tuple(env,
-// 				 std::mem::transmute(term), std::mem::transmute(&arity), std::mem::transmute(&array)) {
-// 				0 => Err(NifError::Badarg),
-// 				_ => {
-// 						if arity != 2 {
-// 							Err(NifError::Badarg)
-// 						}
-// 						else {
-// 							Ok(( try!(Decodable::from_term(env, std::mem::transmute(*(array.offset(0))))),
-// 							     try!(Decodable::from_term(env, std::mem::transmute(*(array.offset(1)))))
-// 							  ))	
-// 						}
-// 					}
-// 				}
+// 			match enif_is_list(transmute(env), transmute(term)) {
+// 				0 => Err(Error::Badarg),
+// 				_ => Ok(ListDecoder{env: env, tail: transmute(term)})
 // 			}
 // 		}
 // 	}
-
-
-  // fn from_term(term: u32) -> Option<(T0,T1)> {
-  //  let ts = [5,3];
-  //  match TermTranscodeable::from_term(ts[0]) {
-  //    Some(u0) =>
-  //     match TermTranscodeable::from_term(ts[1]) {
-  //     Some(u1) => Some((u0,u1)),
-  //     _ => None,
-  //    },
-  //    _ => None,
-  //  }
-  // }
-//   fn from_term(term: u32) -> Option<(T0,T1)> {
-//      let ts = [5,3];
-//      Some((
-//       match TermTranscodeable::from_term(ts[0]) {
-//         Some(u0) => u0,
-//         _ => return None,
-//       },
-//       match TermTranscodeable::from_term(ts[1]) {
-//         Some(u1) => u1,
-//         _ => return None,
-//       }
-//       ))
-//   }
-
-//   fn to_term(&self) -> u32 {
-//      6
-//   }
 // }
+
+// impl Iterator<'a> for ListDecoder<'a> {
+// 	type Item = Term<'a>;
+// 	fn next(&mut self) -> Option<Self::Item> {
+// 		unsafe {
+// 			let mut head = uninitialized();
+// 			let mut newtail = uninitialized();
+// 			match enif_get_list_cell(self.env, self.tail, &mut head, &mut newtail) {
+// 				0 => None,
+// 				_ => {
+// 					self.tail = newtail;
+// 					Some(transmute(head))
+// 				},
+// 			}
+// 		}
+// 	}
+// }
+
 
 
 
@@ -568,183 +610,59 @@ implement_simple_transcodable!(u64, enif_make_uint64, enif_get_uint64);
 // make ref
 
 
-// #[macro_export]
-// macro_rules! wrap_l2_nif {
-// 	($wrappee:ident) => (
-// 		#[no_mangle]
-// 		pub extern "C" fn concat_idents!($wrapee, _wrapped)(env: *mut ErlNifEnv,
-// 		                          argc: c_int,
-// 		                          args: *const ERL_NIF_TERM) -> ERL_NIF_TERM
-// 		{
-// 		    unsafe {
-// 		         match $wrapee(&*env, std::slice::from_raw_buf(transmute(&args), argc as usize)) {
-// 		            Ok(x) => transmute(x),
-// 		            _ => enif_make_badarg(env),
-// 		         }
-// 		    }
-// 		}
-// 	)
-// }
-
-
-pub type RusterFnType<'a> = fn(env:&'a Env, args:&[Term<'a>]) -> Result<Term<'a>,NifError>;
+pub type RusterFnType<'a> = fn(env:&'a Env, args:&[Term<'a>]) -> Result<Term<'a>>;
 //type blah_type = fn(blah:i32) -> i32;
 
 
-#[inline]
-pub fn ruster_fn_wrapper(env: *mut ruster_unsafe::ErlNifEnv,
-		                    argc: ruster_unsafe::c_int,
-		                    args: *const ruster_unsafe::ERL_NIF_TERM,
-		                    ruster_fn: RusterFnType,
-		                    ) -> ruster_unsafe::ERL_NIF_TERM {
-    unsafe {
-    	//println!("input arg = {:?}", *args);
-        match ruster_fn(transmute(env), std::slice::from_raw_parts(args as *const Term, argc as usize)) {
-            Ok(x) => {
-           		let result = std::mem::transmute(x);
-    			//println!("return = {:?}", x);
-    			result
-    		},
-            _ => ruster_unsafe::enif_make_badarg(env),
-        }
-    }
-}
+// #[inline]
+// pub fn ruster_fn_wrapper(env: *mut erlang_nif_sys::ErlNifEnv,
+// 		                    argc: erlang_nif_sys::c_int,
+// 		                    args: *const erlang_nif_sys::ERL_NIF_TERM,
+// 		                    ruster_fn: RusterFnType,
+// 		                    ) -> erlang_nif_sys::ERL_NIF_TERM {
+//     unsafe {
+//     	//println!("input arg = {:?}", *args);
+//         match ruster_fn(transmute(env), std::slice::from_raw_parts(args as *const Term, argc as usize)) {
+//             Ok(x) => {
+//            		let result = std::mem::transmute(x);
+//     			//println!("return = {:?}", x);
+//     			result
+//     		},
+//             _ => erlang_nif_sys::enif_make_badarg(env),
+//         }
+//     }
+// }
 
-
-#[macro_export]
-macro_rules! unsafe_wrapper {
-	($wrapper:ident, $wrappee:ident) => (
-		extern "C" fn $wrapper(env: *mut ruster_unsafe::ErlNifEnv,
-		                          argc: ruster_unsafe::c_int,
-		                          args: *const ruster_unsafe::ERL_NIF_TERM) -> ruster_unsafe::ERL_NIF_TERM
-		{
-			$crate::ruster_fn_wrapper(env, argc, args, $wrappee)
-		}
-	)
-}
 
 // #[macro_export]
 // macro_rules! unsafe_wrapper {
 // 	($wrapper:ident, $wrappee:ident) => (
-// 		extern "C" fn $wrapper(env: *mut ruster_unsafe::ErlNifEnv,
-// 		                          argc: ruster_unsafe::c_int,
-// 		                          args: *const ruster_unsafe::ERL_NIF_TERM) -> ruster_unsafe::ERL_NIF_TERM
+// 		extern "C" fn $wrapper(env: *mut erlang_nif_sys::ErlNifEnv,
+// 		                          argc: erlang_nif_sys::c_int,
+// 		                          args: *const erlang_nif_sys::ERL_NIF_TERM) -> erlang_nif_sys::ERL_NIF_TERM
 // 		{
-// 		    unsafe {
-// 		        match $wrappee(&*env, std::slice::from_raw_parts(std::mem::transmute(&args), argc as usize)) {
-// 		           Ok(x) => std::mem::transmute(x),
-// 		           _ => ruster_unsafe::enif_make_badarg(env),
-// 		        }
-// 		    }
+// 			$crate::ruster_fn_wrapper(env, argc, args, $wrappee)
 // 		}
 // 	)
 // }
 
-// /// Create ErlNifFunc structure.  Use inside `nif_init!`.
-// #[macro_export]
-// macro_rules! nif{
-//     ($name:expr, $arity:expr, $function:expr, $flags:expr) => (
-//         ruster_unsafe::ErlNifFunc { name:     $name as *const u8,
-//                      arity:    $arity,
-//                      function: $function,
-//                      flags:    $flags});
-
-//     ($name:expr, $arity:expr, $function:expr) => (
-//         nif!($name, $arity, $function, 0))
-// }
-
-// #[doc(hidden)]
-// #[macro_export]
-// macro_rules! count_expr {
-//     () => { 0 };
-//     ($_e:expr) => { 1 };
-//     ($_e:expr, $($rest:expr),+) => { 1 + count_expr!($($rest),*) }
-// }
 
 
-// /// Register NIFs and supporting functions for your module.
-// #[macro_export]
-// macro_rules! nif_init {
-//     ($module:expr, $load:expr, $reload:expr, $upgrade:expr, $unload:expr, $($func:expr),* ) => (
-//         const NUM_FUNCS: usize = count_expr!($($func),*);
-//         const FUNCS: [$crate::ErlNifFunc; NUM_FUNCS] = [$($func),*];
-//         static mut ENTRY: ruster_unsafe::ErlNifEntry = ruster_unsafe::ErlNifEntry{
-//             major : NIF_MAJOR_VERSION,
-//             minor : NIF_MINOR_VERSION,
-//             name : $module as *const u8,
-//             num_of_funcs : NUM_FUNCS as c_int,
-//             funcs : &FUNCS as *const ruster_unsafe::ErlNifFunc,
-//             load :    $load,
-//             reload :  $reload,
-//             upgrade : $upgrade,
-//             unload :  $unload,
-//             vm_variant : b"beam.vanilla\0" as *const u8,
-//             options: 0,
-//         };
 
-//         #[no_mangle]
-//         pub extern "C" fn nif_init() -> *const ruster_unsafe::ErlNifEntry {
-//             unsafe {&ENTRY}
-//         }
-//     )
-// }
+#[macro_export]
+macro_rules! nif_wrapper {
+	($wrapper:ident, $wrappee:ident) => (
+		extern "C" fn $wrapper(env: *mut erlang_nif_sys::ErlNifEnv,
+		                          argc: erlang_nif_sys::c_int,
+		                          args: *const erlang_nif_sys::ERL_NIF_TERM) -> erlang_nif_sys::ERL_NIF_TERM {
+		    unsafe {
+		        match $wrappee(std::mem::transmute(env), std::slice::from_raw_parts(args as *const Term, argc as usize)) {
+		            Ok(x) => std::mem::transmute(x),
+		            _     => erlang_nif_sys::enif_make_badarg(env),
+		        }
+		    }		
+		}
+	)
+}
 
 
-// #[macro_export]
-// macro_rules! nif {
-// 	($($args:expr),*) => { $crate::nif!($($args),*) };
-// }
-
-// #[macro_export]
-// macro_rules! nif_init {
-// 	($($args:expr),*) => { $crate::nif_init!($($args),*) };
-// }
-
-// #[doc(hidden)]
-// #[macro_export]
-// macro_rules! count_expr {
-//     () => { 0 };
-//     ($_e:expr) => { 1 };
-//     ($_e:expr, $($rest:expr),+) => { 1 + count_expr!($($rest),*) }
-// }
-
-
-// /// Create ErlNifFunc structure.  Use inside `nif_init!`.
-// #[macro_export]
-// macro_rules! ruster_nif{
-//     ($name:expr, $arity:expr, $function:expr, $flags:expr) => (
-//         ErlNifFunc { name:     $name as *const u8,
-//                      arity:    $arity,
-//                      function: concat_idents!($function, _unsafe_wrapper),
-//                      flags:    $flags});
-
-//     ($name:expr, $arity:expr, $function:expr) => (
-//         ruster_nif!($name, $arity, $function, 0))
-// }
-
-// /// Register NIFs and supporting functions for your module.
-// #[macro_export]
-// macro_rules! ruster_init {
-//     ($module:expr, $load:expr, $reload:expr, $upgrade:expr, $unload:expr, $($func:expr),* ) => (
-//         const NUM_FUNCS: usize = count_expr!($($func),*);
-//         const FUNCS: [ErlNifFunc; NUM_FUNCS] = [$($func),*];
-//         static mut ENTRY: ErlNifEntry = ErlNifEntry{
-//             major : NIF_MAJOR_VERSION,
-//             minor : NIF_MINOR_VERSION,
-//             name : $module as *const u8,
-//             num_of_funcs : NUM_FUNCS as c_int,
-//             funcs : &FUNCS as *const ErlNifFunc,
-//             load :    $load,
-//             reload :  $reload,
-//             upgrade : $upgrade,
-//             unload :  $unload,
-//             vm_variant : b"beam.vanilla\0" as *const u8,
-//             options: 0,
-//         };
-
-//         #[no_mangle]
-//         pub extern "C" fn nif_init() -> *const ErlNifEntry {
-//             unsafe {&ENTRY}
-//         }
-//     )
-// }

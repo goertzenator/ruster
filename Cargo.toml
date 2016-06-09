@@ -9,9 +9,13 @@ license = "MIT/Apache-2.0"
 keywords = ["FFI", "Erlang", "NIF"]
 
 [dependencies]
-#ruster_unsafe = "0.1"
-libc = "0.1"
+#erlang_nif-sys = "0.4"
+erlang_nif-sys = { path = "/home/goertzen/erlang_nif-sys" }
+libc = "0.2"
 
-[dependencies.ruster_unsafe]
-path = "/home/goertzen/ruster_unsafe"
+#[dependencies.ruster_unsafe]
+#path = "/home/goertzen/ruster_unsafe"
+
+[lib]
+doctest = false
 

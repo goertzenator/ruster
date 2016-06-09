@@ -1,0 +1,15 @@
+[package]
+name = "test_nif"
+version = "0.0.2"
+authors = ["Daniel Goertzen <daniel.goertzen@gmail.com>"]
+
+[lib]
+name = "test_nif"
+crate-type = ["dylib"]
+
+[dependencies]
+#erlang_nif-sys = "0.4"
+erlang_nif-sys = { path = "/home/goertzen/erlang_nif-sys" }
+
+#ruster = "0.1"
+ruster = { path = "../../../.." }
