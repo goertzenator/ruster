@@ -1,6 +1,6 @@
 [package]
 name = "ruster"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Daniel Goertzen <daniel.goertzen@gmail.com>"]
 description = "Create Erlang NIF modules in Rust using a high level Rustic API."
 #documentation = "http://goertzenator.github.io/ruster/ruster/index.html"
@@ -9,13 +9,7 @@ license = "MIT/Apache-2.0"
 keywords = ["FFI", "Erlang", "NIF"]
 
 [dependencies]
-#erlang_nif-sys = "0.4"
-erlang_nif-sys = { path = "/home/goertzen/erlang_nif-sys" }
-libc = "0.2"
-
-#[dependencies.ruster_unsafe]
-#path = "/home/goertzen/ruster_unsafe"
+erlang_nif-sys = "0.5"
 
 [lib]
 doctest = false
-
