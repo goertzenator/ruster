@@ -99,10 +99,11 @@ Use of `Env` is not threadsafe, hence it lacks the `Sync` trait.
 
 
 //#[macro_use]
-pub extern crate erlang_nif_sys;
+extern crate erlang_nif_sys;
 
-use erlang_nif_sys::*;
-
+//use erlang_nif_sys::*; // no good, can't declare new erlang_nif_sys_alias
+use erlang_nif_sys as ens;
+use erlang_nif_sys as erlang_nif_sys_api;
 
 
 /*
@@ -125,12 +126,102 @@ Env and Term constraints
 */
 
 
+// #[macro_use]
+// mod initmacro;
 
-
-pub use erlang_nif_sys::ErlNifEnv as Env;
-pub use erlang_nif_sys::ErlNifPid as Pid;
+// pub use erlang_nif_sys::ErlNifEnv as Env;
+// pub use erlang_nif_sys::ErlNifPid as Pid;
 
 use std::result;
+
+
+// // Term types traits
+// trait HoldsEnvItem {
+// 	fn new(env: *ErlNifEnv, cterm: &T) -> Self;
+// 	fn get_cterm(env: *ErlNifEnv) -> &T;
+// }
+
+
+// struct<T> CheckedContainer {}   impl HoldsEnvItem;  T=ERL_NIF_TERM
+// struct<T> UncheckedContainer {} impl HoldsEnvItem;
+
+// type Term = CheckedContainer<ERL_NIF_TERM>;
+// type Term = UncheckedContainer<ERL_NIF_TERM>;
+// type TermSlice = CheckedContainer<&[ERL_NIF_TERM]>;
+// type TermSlice = UncheckedContainer<&[ERL_NIF_TERM]>;
+
+
+
+
+// // Data traits
+// trait FromTerm {
+// 	fn from_term(term: Term, env: Env) -> Self;
+// }
+
+// trait ToTerm {
+// 	fn to_term(&self, env: Env) -> Term;
+// }
+
+
+
+// // not really data...
+// impl Term {
+// 	fn from_term(&self, env: Env) -> T:FromTerm {
+// 		FromTerm::
+// 	}
+// }
+
+
+
+// // These tuple imps are not traits, just plain impls.
+// //
+
+// impl<T0: CTerm, T1: CTerm> CTerm for (T0, T1,) {
+// 	fn as_term(&self, env: &mut Env) -> CTerm {
+// 		let terms = [self.0.as_term(env), self.1.as_term(env)];
+// 		terms.as_ref().as_term(env)
+// 	}
+// }
+// impl<T0: FromTerm<CTerm>, T1: FromTerm<CTerm>> FromTerm<CTerm> for (T0, T1,) {
+// 	fn from_term(env: &mut Env, term: CTerm) -> Result<Self> {
+// 		let terms:&[CTerm] = try!(term.term_as(env));
+// 		FromTerm::from_term(env, terms)
+// 	}
+// }
+
+// impl<'a, T0: FromTerm<CTerm>, T1: FromTerm<CTerm>> FromTerm<&'a [CTerm]> for (T0, T1,) {
+// 	fn from_termslic(eenv: &mut Env, terms: &[CTerm]) -> Result<Self> {
+// 		if terms.len() != 2 { return Err(Error::Badarg) };
+// 		Ok((
+// 			try!(terms[0].term_as(env)), try!(terms[1].term_as(env)),
+// 		))
+// 	}
+// }
+
+
+
+// struct UncheckedTerm {}
+// struct CheckedTerm {}
+// struct EnvlessTerm {}   // struct or trait?
+
+// impl CTerm for UncheckedTerm {
+
+// }
+
+// impl CTerm for CheckedTerm {
+
+// }
+
+// impl CTerm for EnvlessTerm {
+
+// }
+
+// impl EnvlessTerm {
+// 	fn new_noenv(cterm: ERL_NIF_TERM) -> Self;
+// 	fn get_cterm_noenv() -> ERL_NIF_TERM;
+// }}
+
+
 
 
 /// Convenience name for low level term type.
@@ -168,8 +259,8 @@ pub type Term = CTerm;
 pub type TermSlice<'a> = CTermSlice<'a>;
 
 
-// pub type Term = Checked<CTerm>;
-// pub type TermSlice = Checked<CTermSlice>;
+pub type Term = Checked<CTerm>;
+pub type TermSlice = Checked<CTermSlice>;
 
 
 /// Wrapper type for automatic environment checking
@@ -221,32 +312,29 @@ pub trait DontCheckEnv {}
 /// Convert Rust type to NIF Term
 ///
 /// New types should implement AsTerm<CTerm> and FromTerm<CTerm>.
-pub trait AsTerm<T> {
-	fn as_term(&self, env: &mut Env) -> T;
-	fn term_from(env: &mut Env, x: &Self) -> T {
-		x.as_term(env)
-	}
+pub trait ToTerm<T> {
+	fn to_term(&self, env: &mut Env) -> T;
 }
 
 /// Convert NIF Term to Rust type
 ///
 /// New types should implement AsTerm<CTerm> and FromTerm<CTerm>.
 pub trait FromTerm<T>: Sized {
-	fn from_term(env:&mut Env, term: T) -> Result<Self>;
+	fn from_term(env: &mut Env, term: T) -> Result<Self>;
 }
 
 
-/// Blanket `impl` for `Checkable` types.
-impl<X, T> AsTerm<Checked<T>> for X
-	where X: AsTerm<T>,
+/// Blanket `impl` for `Checkable` types.  FIXME: toss Checkable type?
+impl<X, T> ToTerm<Checked<T>> for X
+	where X: ToTerm<T>,
 		T: Checkable {
-	fn as_term(&self, env: &mut Env) -> Checked<T> {
-		let termlike = self.as_term(env);
+	fn to_term(&self, env: &mut Env) -> Checked<T> {
+		let termlike = self.to_term(env);
 		Checked::new(env, termlike)
 	}
 }
 
-/// Blanket `impl` for `Checkable` types.
+/// Blanket `impl` for `Checkable` types.  FIXME: toss Checkable type?
 impl<X, T> FromTerm<Checked<T>> for X
 	where X: FromTerm<T>,
 		T: Checkable {
@@ -257,7 +345,7 @@ impl<X, T> FromTerm<Checked<T>> for X
 }
 
 
-// Enable this when impl specialization lands
+/// Enable this when impl specialization lands
 // impl<X> FromTerm<CheckedTerm> for X
 // 	where X: FromTerm<CTerm> + DontCheck {
 // 	fn from_term(env:&mut Env, term: CheckedTerm) -> Result<Self> {
@@ -272,14 +360,14 @@ impl<X, T> FromTerm<Checked<T>> for X
 ///
 /// This trait has a blanket impl for type implementing `FromTerm`.
 /// For new types, implement `FromTerm<CTerm>`.
-pub trait TermAs<X> {
-	fn term_as(self, env: &mut Env) -> Result<X>;
+pub trait TermFromTerm<X> {
+	fn from_term(self, env: &mut Env) -> Result<X>;
 }
 
 
-impl<X, T> TermAs<X> for T
+impl<X, T> TermFromTerm<X> for T
 	where X: FromTerm<T> {
-	fn term_as(self, env: &mut Env) -> Result<X> {
+	fn from_term(self, env: &mut Env) -> Result<X> {
 		X::from_term(env, self)
 	}
 }
@@ -287,34 +375,35 @@ impl<X, T> TermAs<X> for T
 
 
 
+
 /// An owned, process independent environment
 ///
 /// RAII wrapper for process independent environments.
-#[derive(Debug)]
-pub struct OwnedEnv {
-	env: *mut Env,
-	marker: std::marker::PhantomData<Env>,
-}
+// #[derive(Debug)]
+// pub struct OwnedEnv {
+// 	env: *mut Env,
+// 	marker: std::marker::PhantomData<Env>,
+// }
 
-impl OwnedEnv {
-	pub fn new() -> OwnedEnv {
-		OwnedEnv{
-			env: unsafe{ enif_alloc_env() },
-			marker: std::marker::PhantomData,
-		}
-	}
+// impl OwnedEnv {
+// 	pub fn new() -> OwnedEnv {
+// 		OwnedEnv{
+// 			env: unsafe{ ens::enif_alloc_env() },
+// 			marker: std::marker::PhantomData,
+// 		}
+// 	}
 
-	// pub fn get_env(&mut self) -> &mut Env {
-	// 	unsafe{ &mut *self.env }
-	// }
+// 	// pub fn get_env(&mut self) -> &mut Env {
+// 	// 	unsafe{ &mut *self.env }
+// 	// }
 
-}
+// }
 
-impl AsMut<Env> for OwnedEnv {
-	fn as_mut(&mut self) -> &mut Env {
-		unsafe{ &mut *self.env }
-	}
-}
+// impl AsMut<Env> for OwnedEnv {
+// 	fn as_mut(&mut self) -> &mut Env {
+// 		unsafe{ &mut *self.env }
+// 	}
+// }
 
 // impl Deref for OwnedEnv {
 //     type Target = Env;
@@ -331,30 +420,30 @@ impl AsMut<Env> for OwnedEnv {
 // }
 
 
-impl Drop for OwnedEnv {
-	fn drop(&mut self) {
-        unsafe{ enif_free_env(self.env) };
-    }
-}
+// impl Drop for OwnedEnv {
+// 	fn drop(&mut self) {
+//         unsafe{ ens::enif_free_env(self.env) };
+//     }
+// }
 
-/// An environment that has been invalidated by a `send()`.
-///
-/// The environment may be `clear()`ed to yield another `OwnedEnv`,
-/// or just dropped to destroy the enviroment.
-#[derive(Debug)]
-pub struct InvalidEnv {
-	invalid: OwnedEnv,
-}
+// /// An environment that has been invalidated by a `send()`.
+// ///
+// /// The environment may be `clear()`ed to yield another `OwnedEnv`,
+// /// or just dropped to destroy the enviroment.
+// #[derive(Debug)]
+// pub struct InvalidEnv {
+// 	invalid: OwnedEnv,
+// }
 
-impl InvalidEnv {
-	fn new(env: OwnedEnv) -> InvalidEnv {
-		InvalidEnv{ invalid: env }
-	}
-	pub fn clear(self) -> OwnedEnv {
-		unsafe{ enif_clear_env(self.invalid.env); }
-		self.invalid
-	}
-}
+// impl InvalidEnv {
+// 	fn new(env: OwnedEnv) -> InvalidEnv {
+// 		InvalidEnv{ invalid: env }
+// 	}
+// 	pub fn clear(self) -> OwnedEnv {
+// 		unsafe{ ens::enif_clear_env(self.invalid.env); }
+// 		self.invalid
+// 	}
+// }
 
 
 
@@ -373,35 +462,35 @@ impl InvalidEnv {
 // }
 
 
-pub unsafe fn send_from_thread(to_pid: &Pid, msg_env: OwnedEnv, msg:CTerm) -> result::Result<InvalidEnv, OwnedEnv> {
-	send_main(std::ptr::null_mut(), to_pid, msg_env, msg)
-}
+// pub unsafe fn send_from_thread(to_pid: &Pid, msg_env: OwnedEnv, msg:CTerm) -> result::Result<InvalidEnv, OwnedEnv> {
+// 	send_main(std::ptr::null_mut(), to_pid, msg_env, msg)
+// }
 
-pub unsafe fn send_from_process(env: &mut Env, to_pid: &Pid, msg_env: OwnedEnv, msg:CTerm) -> result::Result<InvalidEnv, OwnedEnv> {
-	send_main(env, to_pid, msg_env, msg)
-}
+// pub unsafe fn send_from_process(env: &mut Env, to_pid: &Pid, msg_env: OwnedEnv, msg:CTerm) -> result::Result<InvalidEnv, OwnedEnv> {
+// 	send_main(env, to_pid, msg_env, msg)
+// }
 
-fn send_main(env: *mut Env, to_pid: &Pid, mut msg_env: OwnedEnv, msg:CTerm) -> result::Result<InvalidEnv, OwnedEnv> {
-	unsafe{
-		match enif_send(env, &*to_pid, msg_env.as_mut(), msg) {
-			0 => Err(msg_env),
-			_ => Ok(InvalidEnv::new(msg_env))
-		}
-	}
-}
+// fn send_main(env: *mut Env, to_pid: &Pid, mut msg_env: OwnedEnv, msg:CTerm) -> result::Result<InvalidEnv, OwnedEnv> {
+// 	unsafe{
+// 		match ens::enif_send(env, &*to_pid, msg_env.as_mut(), msg) {
+// 			0 => Err(msg_env),
+// 			_ => Ok(InvalidEnv::new(msg_env))
+// 		}
+// 	}
+// }
 
 
 
-// Get pid of current process.
-// Underlying nif implementation will provide an invalid PID if the
-// provided environment is process independent.
-pub fn selfpid(env:&mut Env) -> Pid {
-	unsafe {
-		let mut pid:Pid = std::mem::uninitialized();
-		enif_self(env, &mut pid);
-		pid
-	}
-}
+// // Get pid of current process.
+// // Underlying nif implementation will provide an invalid PID if the
+// // provided environment is process independent.
+// pub fn selfpid(env:&mut Env) -> Pid {
+// 	unsafe {
+// 		let mut pid:Pid = std::mem::uninitialized();
+// 		ens::enif_self(env, &mut pid);
+// 		pid
+// 	}
+// }
 
 
 // /// Send message and free sending environment.
@@ -458,41 +547,41 @@ pub type Result<T> = result::Result<T, Error>;
 ////////////
 // Atom
 
-#[derive(Copy, Clone, Debug)]
-#[repr(C)]
-pub struct Atom(CTerm);
+// #[derive(Copy, Clone, Debug)]
+// #[repr(C)]
+// pub struct Atom(CTerm);
 
-impl Atom {
-	pub fn new(env: &mut Env, name: &str) -> Atom {
-		unsafe {
-			Atom(enif_make_atom_len(env, name.as_ptr(), name.len()))
-		}
-	}
+// impl Atom {
+// 	pub fn new(env: &mut Env, name: &str) -> Atom {
+// 		unsafe {
+// 			Atom(ens::enif_make_atom_len(env, name.as_ptr(), name.len()))
+// 		}
+// 	}
 
-	// pub unsafe fn unchecked_from_term(term: Term) -> Atom {
-	// 	Atom {
-	// 		term: term.get_unchecked(),
-	// 	}
-	// }
-}
+// 	// pub unsafe fn unchecked_from_term(term: Term) -> Atom {
+// 	// 	Atom {
+// 	// 		term: term.get_unchecked(),
+// 	// 	}
+// 	// }
+// }
 
 // Atoms are not environment bound, so don't actually check environment for Atoms.
-impl DontCheckEnv for Atom {}
+// impl DontCheckEnv for Atom {}
 
-impl AsTerm<CTerm> for Atom {
-	fn as_term(&self, _env: &mut Env) -> CTerm {
-		self.0
-	}
-}
+// impl AsTerm<CTerm> for Atom {
+// 	fn as_term(&self, _env: &mut Env) -> CTerm {
+// 		self.0
+// 	}
+// }
 
-impl FromTerm<CTerm> for Atom {
-	fn from_term(env: &mut Env, term: CTerm) -> Result<Self> {
-		match unsafe{ enif_is_atom(env, term) } {
-			0 => Err(Error::Badarg),
-			_ => Ok(Atom(term)),
-		}
-	}
-}
+// impl FromTerm<CTerm> for Atom {
+// 	fn from_term(env: &mut Env, term: CTerm) -> Result<Self> {
+// 		match unsafe{ ens::enif_is_atom(env, term) } {
+// 			0 => Err(Error::Badarg),
+// 			_ => Ok(Atom(term)),
+// 		}
+// 	}
+// }
 
 // // Atoms are not environment bound, so don't actually check environment for Atoms.
 // impl FromTerm<CheckedTerm> for Atom {
@@ -507,74 +596,73 @@ impl FromTerm<CTerm> for Atom {
 // Basic types
 
 pub trait SimpleConvertible: Copy {
-	unsafe fn make(env: *mut Env, val: Self) -> CTerm;
-	unsafe fn get(env: *mut Env, term: CTerm, val: *mut Self) -> c_int;
+	//unsafe fn make(env: *mut Env, val: Self) -> CTerm;
+	//unsafe fn get(env: *mut Env, term: CTerm, val: *mut Self) -> c_int;
 }
 
+// impl<X> AsTerm<CTerm> for X
+// 	where X: SimpleConvertible {
+// 	fn as_term(&self, env: &mut Env) -> CTerm {
+// 		unsafe{ SimpleConvertible::make(env, *self) }
+// 	}
+// }
 
-impl<X> AsTerm<CTerm> for X
-	where X: SimpleConvertible {
-	fn as_term(&self, env: &mut Env) -> CTerm {
-		unsafe{ SimpleConvertible::make(env, *self) }
-	}
-}
+// impl<X> FromTerm<CTerm> for X
+// 	where X: SimpleConvertible {
+// 	fn from_term(env: &mut Env, term: CTerm) -> Result<Self> {
+// 		let mut result: Self = unsafe {std::mem::uninitialized()};
+// 		match unsafe {SimpleConvertible::get(env, term, &mut result)} {
+// 			0 => Err(Error::Badarg),
+// 			_ => Ok(result),
+// 		}
+// 	}
+// }
 
-impl<X> FromTerm<CTerm> for X
-	where X: SimpleConvertible {
-	fn from_term(env: &mut Env, term: CTerm) -> Result<Self> {
-		let mut result: Self = unsafe {std::mem::uninitialized()};
-		match unsafe {SimpleConvertible::get(env, term, &mut result)} {
-			0 => Err(Error::Badarg),
-			_ => Ok(result),
-		}
-	}
-}
-
-impl SimpleConvertible for c_int {
-	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-		enif_make_int(env, val)
-	}
-	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
-		enif_get_int(env, term, ptr)
-	}
-}
+// impl SimpleConvertible for c_int {
+// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
+// 		ens::enif_make_int(env, val)
+// 	}
+// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
+// 		ens::enif_get_int(env, term, ptr)
+// 	}
+// }
 
 
-impl SimpleConvertible for c_uint {
-	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-		enif_make_uint(env, val)
-	}
-	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
-		enif_get_uint(env, term, ptr)
-	}
-}
+// impl SimpleConvertible for c_uint {
+// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
+// 		ens::enif_make_uint(env, val)
+// 	}
+// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
+// 		ens::enif_get_uint(env, term, ptr)
+// 	}
+// }
 
-impl SimpleConvertible for c_double {
-	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-		enif_make_double(env, val)
-	}
-	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
-		enif_get_double(env, term, ptr)
-	}
-}
+// impl SimpleConvertible for c_double {
+// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
+// 		ens::enif_make_double(env, val)
+// 	}
+// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
+// 		ens::enif_get_double(env, term, ptr)
+// 	}
+// }
 
-impl SimpleConvertible for i64 {
-	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-		enif_make_int64(env, val)
-	}
-	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
-		enif_get_int64(env, term, ptr)
-	}
-}
+// impl SimpleConvertible for i64 {
+// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
+// 		ens::enif_make_int64(env, val)
+// 	}
+// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
+// 		ens::enif_get_int64(env, term, ptr)
+// 	}
+// }
 
-impl SimpleConvertible for u64 {
-	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-		enif_make_uint64(env, val)
-	}
-	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
-		enif_get_uint64(env, term, ptr)
-	}
-}
+// impl SimpleConvertible for u64 {
+// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
+// 		ens::enif_make_uint64(env, val)
+// 	}
+// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
+// 		ens::enif_get_uint64(env, term, ptr)
+// 	}
+// }
 
 
 
@@ -582,66 +670,70 @@ impl SimpleConvertible for u64 {
 ////////////
 // CTerm
 
-impl AsTerm<CTerm> for CTerm {
-	fn as_term(&self, _env: &mut Env) -> CTerm {
-		*self
-	}
-}
-impl FromTerm<CTerm> for CTerm {
-	fn from_term(_env: &mut Env, term: CTerm) -> Result<Self> {
-		Ok(term)
-	}
-}
+// impl AsTerm<CTerm> for CTerm {
+// 	fn as_term(&self, _env: &mut Env) -> CTerm {
+// 		*self
+// 	}
+// }
+// impl FromTerm<CTerm> for CTerm {
+// 	fn from_term(_env: &mut Env, term: CTerm) -> Result<Self> {
+// 		Ok(term)
+// 	}
+// }
 
 
 ////////////
 // Erlang tuple as slice
 
-impl<'a> AsTerm<CTerm> for &'a [CTerm] {
-	fn as_term(&self, env: &mut Env) -> CTerm {
-		unsafe {
-			enif_make_tuple_from_array(
-				env,
-				self.as_ptr(),
-				self.len() as c_uint)
-		}
-	}
-}
+// impl<'a> AsTerm<CTerm> for &'a [CTerm] {
+// 	fn as_term(&self, env: &mut Env) -> CTerm {
+// 		unsafe {
+// 			enif_make_tuple_from_array(
+// 				env,
+// 				self.as_ptr(),
+// 				self.len() as c_uint)
+// 		}
+// 	}
+// }
 
-impl<'a> FromTerm<CTerm> for &'a [CTerm] {
-	fn from_term(env:&mut Env, term: CTerm) -> Result<Self> {
-		unsafe {
-			let mut arity:c_int = std::mem::uninitialized();
-			let mut array:*const CTerm = std::mem::uninitialized();
-			match enif_get_tuple(env, term, &mut arity, &mut array) {
-				0 => Err(Error::Badarg),
-				_ => Ok(std::slice::from_raw_parts(array, arity as usize)),
-			}
-		}
-	}
-}
+// impl<'a> FromTerm<CTerm> for &'a [CTerm] {
+// 	fn from_term(env:&mut Env, term: CTerm) -> Result<Self> {
+// 		unsafe {
+// 			let mut arity:c_int = std::mem::uninitialized();
+// 			let mut array:*const CTerm = std::mem::uninitialized();
+// 			match ens::enif_get_tuple(env, term, &mut arity, &mut array) {
+// 				0 => Err(Error::Badarg),
+// 				_ => Ok(std::slice::from_raw_parts(array, arity as usize)),
+// 			}
+// 		}
+// 	}
+// }
+
+
+
+
 
 
 ////////////
 // Erlang tuple as tuple
 
 
-mod tuple;
-pub use tuple::*;
+// mod tuple;
+// pub use tuple::*;
 
 
 ////////////
 // Resources
 
-mod resource;
-pub use resource::*;
+// mod resource;
+// pub use resource::*;
 
 
 ////////////
 // Binaries
 
-mod binary;
-pub use binary::*;
+// mod binary;
+// pub use binary::*;
 
 
 
@@ -685,58 +777,73 @@ pub use binary::*;
 
 
 
-pub type RusterFnType = fn(env:&mut Env, args:TermSlice) -> Result<Term>;
+// pub type RusterFnType = fn(env:&mut Env, args:TermSlice) -> Result<Term>;
 
 
 
-// Checked version
-#[cfg(debug_assertions)]
-#[inline]
-pub fn ruster_fn_wrapper(env: *mut Env,
-                            argc: c_int,
-		                    args: *const CTerm,
-		                    ruster_fn: RusterFnType,
-		                    ) -> CTerm {
-    unsafe {
-    	let cterms = std::slice::from_raw_parts(args, argc as usize);
-    	//let terms:Vec<CheckedTerm> = cterms.iter().map(|term| CheckedTerm::new(env,*term)).collect();
-    	let terms = Checked::new(env, cterms);
-        match ruster_fn(&mut *env, terms) {
-            Ok(rterm) => rterm.get(env),
-            _         => enif_make_badarg(env),
-        }
-    }
-}
+// // Checked version
+// #[cfg(debug_assertions)]
+// #[inline]
+// pub fn ruster_fn_wrapper(env: *mut Env,
+//                             argc: c_int,
+// 		                    args: *const CTerm,
+// 		                    ruster_fn: RusterFnType,
+// 		                    ) -> CTerm {
+//     unsafe {
+//     	let cterms = std::slice::from_raw_parts(args, argc as usize);
+//     	//let terms:Vec<CheckedTerm> = cterms.iter().map(|term| CheckedTerm::new(env,*term)).collect();
+//     	let terms = Checked::new(env, cterms);
+//         match ruster_fn(&mut *env, terms) {
+//             Ok(rterm) => rterm.get(env),
+//             _         => ens::enif_make_badarg(env),
+//         }
+//     }
+// }
 
-// Unchecked version
-#[cfg(not(debug_assertions))]
-pub fn ruster_fn_wrapper(env: *mut Env,
-                            argc: c_int,
-		                    args: *const CTerm,
-		                    ruster_fn: RusterFnType,
-		                    ) -> CTerm {
-    unsafe {
-    	let terms = std::slice::from_raw_parts(args as *const Term, argc as usize);
-        match ruster_fn(&mut *env, terms) {
-            Ok(rterm) => rterm,
-            _         => enif_make_badarg(env),
-        }
-    }
-}
+// // Unchecked version
+// #[cfg(not(debug_assertions))]
+// pub fn ruster_fn_wrapper(env: *mut Env,
+//                             argc: c_int,
+// 		                    args: *const CTerm,
+// 		                    ruster_fn: RusterFnType,
+// 		                    ) -> CTerm {
+//     unsafe {
+//     	let terms = std::slice::from_raw_parts(args as *const Term, argc as usize);
+//         match ruster_fn(&mut *env, terms) {
+//             Ok(rterm) => rterm,
+//             _         => ens::enif_make_badarg(env),
+//         }
+//     }
+// }
 
 
+
+
+// #[macro_export]
+// macro_rules! nif_wrapper {
+// 	($wrapper:ident, $wrappee:ident) => (
+// 		extern "C" fn $wrapper(env: *mut $crate::Env,
+// 		                          argc: $crate::erlang_nif_sys::c_int,
+// 		                          args: *const $crate::CTerm) -> $crate::CTerm
+// 		{
+// 			$crate::ruster_fn_wrapper(env, argc, args, $wrappee)
+// 		}
+// 	)
+// }
 
 
 #[macro_export]
-macro_rules! nif_wrapper {
-	($wrapper:ident, $wrappee:ident) => (
-		extern "C" fn $wrapper(env: *mut $crate::Env,
-		                          argc: $crate::erlang_nif_sys::c_int,
-		                          args: *const $crate::CTerm) -> $crate::CTerm
-		{
-			$crate::ruster_fn_wrapper(env, argc, args, $wrappee)
-		}
-	)
+macro_rules! ruster_fn {
+    ($f:expr) => ( {
+                use $crate::erlang_nif_sys as ens;
+                |env: *mut ens::ErlNifEnv, argc: ens::c_int, args: *const ens::ERL_NIF_TERM| -> ens::ERL_NIF_TERM {
+			        match $f(&mut *env, std::slice::from_raw_parts(args, argc as usize)) {
+			            Ok(rterm) => rterm,
+			            _         => ens::enif_make_badarg(env),
+			        }
+			    }
+            }
+    );
 }
 
 
@@ -780,3 +887,7 @@ macro_rules! nif_wrapper {
 // }
 
 
+// #[macro_export]
+// macro_rules! ruster_init {
+//     ( $($things:tt)* ) => ( nif_init!($($things:tt)*) )
+// }

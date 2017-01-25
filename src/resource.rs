@@ -1,6 +1,5 @@
 
 use super::*;
-use erlang_nif_sys::*;
 
 use std::{ptr, mem};
 use std::ops::{Deref, DerefMut, Drop};
@@ -23,8 +22,8 @@ static RESOURCE_LUT_INIT: Once = ONCE_INIT;
 
 pub unsafe fn open_resource_type<T: Any>(env: &mut Env, name: &str) -> Result<()> {
     let c_name = CString::new(name).unwrap();
-    let ptr = unsafe { enif_open_resource_type(env, ptr::null(), c_name.as_ptr() as *const u8,
-        Some(resource_destructor::<T>), ErlNifResourceFlags::ERL_NIF_RT_CREATE, ptr::null_mut()) };
+    let ptr = unsafe { ens::enif_open_resource_type(env, ptr::null(), c_name.as_ptr() as *const u8,
+        Some(resource_destructor::<T>), ens::ErlNifResourceFlags::ERL_NIF_RT_CREATE, ptr::null_mut()) };
     if ptr.is_null() {
         return Err(Error::Badarg);
     }

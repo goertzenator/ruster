@@ -1,7 +1,7 @@
 
 
-#[macro_use]
-extern crate erlang_nif_sys;
+// #[macro_use]
+// extern crate erlang_nif_sys;
 
 #[macro_use]
 extern crate ruster as nif;
@@ -14,19 +14,21 @@ use erlang_nif_sys::{enif_priv_data, c_void, c_int};
 use std::cell::Cell;
 
 /// Create NIF module data and init function.
-nif_init!(b"test_nif\0", Some(load), None, None, Some(unload),
-  nif!(b"dynamic_atom\0", 0, dynamic_atom_wrapper),
-  nif!(b"prebuilt_atom\0", 0, prebuilt_atom_wrapper),
-  nif!(b"int\0", 0, int_wrapper),
-  nif!(b"doubleit\0", 1, doubleit_wrapper),
-  nif!(b"selfsend\0", 0, selfsend_wrapper),
-  nif!(b"decode_int\0", 1, decode_int_wrapper),
-  nif!(b"tuple_math\0", 1, tuple_math_wrapper),
-  nif!(b"param2tuple\0", 2, param2tuple_wrapper),
-  nif!(b"make_resource\0", 1, make_resource_wrapper),
-  nif!(b"render_resource\0", 2, render_resource_wrapper),
-  nif!(b"mutate_resource\0", 3, mutate_resource_wrapper),
-  nif!(b"reverse_binary\0", 1, reverse_binary_wrapper)
+nif_init!("test_nif", [
+        ("dynamic_atom",    0, ruster_fn!(dynamic_atom_wrapper)),
+        ("prebuilt_atom",   0, ruster_fn!(prebuilt_atom_wrapper)),
+        ("int",             0, ruster_fn!(int_wrapper)),
+        ("doubleit",        1, ruster_fn!(doubleit_wrapper)),
+        ("selfsend",        0, ruster_fn!(selfsend_wrapper)),
+        ("decode_int",      1, ruster_fn!(decode_int_wrapper)),
+        ("tuple_math",      1, ruster_fn!(tuple_math_wrapper)),
+        ("param2tuple",     2, ruster_fn!(param2tuple_wrapper)),
+        // ("make_resource",   1, ruster_fn!(make_resource_wrapper)),
+        // ("render_resource", 2, ruster_fn!(render_resource_wrapper)),
+        // ("mutate_resource", 3, ruster_fn!(mutate_resource_wrapper)),
+        // ("reverse_binary",  1, ruster_fn!(reverse_binary_wrapper)),
+    ],
+    {load: load, unload: unload}
 );
 
 
@@ -66,7 +68,7 @@ fn get_priv_data(env: &mut Env) -> &'static PrivData {
 // }
 
 
-extern "C" fn load(penv: *mut Env,
+fn load(penv: *mut Env,
                    priv_data: *mut *mut c_void,
                    _load_info: CTerm)-> c_int {
 
@@ -81,117 +83,118 @@ extern "C" fn load(penv: *mut Env,
     0
 }
 
-extern "C" fn unload(_penv: *mut Env,
+fn unload(_penv: *mut Env,
                      priv_data: *mut c_void) {
     unsafe {
         Box::from_raw(priv_data as *mut PrivData); // rebox and drop
     }
 }
 
-
-nif_wrapper!(dynamic_atom_wrapper, dynamic_atom);
-nif_wrapper!(prebuilt_atom_wrapper, prebuilt_atom);
-nif_wrapper!(int_wrapper, int);
-nif_wrapper!(doubleit_wrapper, doubleit);
-nif_wrapper!(selfsend_wrapper, selfsend);
-nif_wrapper!(decode_int_wrapper, decode_int);
-nif_wrapper!(tuple_math_wrapper, tuple_math);
-nif_wrapper!(param2tuple_wrapper, param2tuple);
-nif_wrapper!(make_resource_wrapper, make_resource);
-nif_wrapper!(render_resource_wrapper, render_resource);
-nif_wrapper!(mutate_resource_wrapper, mutate_resource);
-nif_wrapper!(reverse_binary_wrapper, reverse_binary);
-
 fn dynamic_atom(env: &mut Env, _args:&[Term]) -> nif::Result<Term> {
-    Ok(Atom::new(env, "an_atom").as_term(env))
+    Ok(Atom::new(env, "an_atom").to_term(env))
 }
 
 fn prebuilt_atom(env: &mut Env, _args:&[Term]) -> nif::Result<Term> {
-    Ok(get_priv_data(env).prebuilt_atom.as_term(env))
+    Ok(get_priv_data(env).prebuilt_atom.to_term(env))
 }
 
 fn int(env: &mut Env, _args: &[Term]) -> nif::Result<Term> {
-    Ok(12345.as_term(env))
+    Ok(12345.to_term(env))
 }
 
 fn doubleit(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (f,):(f64,) = try!(args.term_as(env));
-    Ok((f*2.0).as_term(env))
+    let (f,):(f64,) = try!(args.from_term(env));
+    Ok((f*2.0).to_term(env))
 }
 
 fn selfsend(env: &mut Env, _args: &[Term]) -> nif::Result<Term> {
     let to_pid = selfpid(env);
     let mut msg_env = OwnedEnv::new();
-    let msg = 9998.as_term(msg_env.as_mut());
+    let msg = 9998.to_term(msg_env.as_mut());
     unsafe{ send_from_process(env, &to_pid, msg_env, msg).unwrap() };
     Ok(AsTerm::term_from(env, &0))
-    //Ok(0.as_term(env))
+    //Ok(0.to_term(env))
 }
 
 
 fn decode_int(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
     //let num:i32 = try!(FromTerm::from_term(env, args[0]));
-    let num:i32 = try!(args[0].term_as(env));
-    Ok( (num * 2).as_term(env) )
+    let num:i32 = try!(args[0].from_term(env));
+    Ok( (num * 2).to_term(env) )
 }
 
 
 
 fn tuple_math(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (a,b):(i32, i32) = try!(args[0].term_as(env));
-    Ok( (a+10, b*2).as_term(env) )
+    let (a,b):(i32, i32) = try!(args[0].from_term(env));
+    Ok( (a+10, b*2).to_term(env) )
 }
 
 fn param2tuple(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (a,b):(i32, i32) = try!(args.term_as(env));
-    Ok( (a+10, b*2).as_term(env) )
+    let (a,b):(i32, i32) = try!(args.from_term(env));
+    Ok( (a+10, b*2).to_term(env) )
 }
 
 
-fn make_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (resnum,):(i32,) = try!(args.term_as(env));
-    match resnum {
-        0 => Ok(ResourcePtr::new(1239).as_term(env)),
-        1 => {
-            let x = ResourcePtr::new(1238);
-            Ok(123.as_term(env))
-        }
-//        1 => Ok(ResourcePtr::new(Cell::new(1238)).as_term(env)),
-        _ => Err(Error::Badarg),
-    }
-}
+// fn make_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
+//     let (resnum,):(i32,) = try!(args.from_term(env));
+//     match resnum {
+//         0 => Ok(ResourcePtr::new(1239).to_term(env)),
+//         1 => {
+//             let x = ResourcePtr::new(1238);
+//             Ok(123.to_term(env))
+//         }
+// //        1 => Ok(ResourcePtr::new(Cell::new(1238)).to_term(env)),
+//         _ => Err(Error::Badarg),
+//     }
+// }
 
-fn render_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (resnum, resterm):(i32, Term) = try!(args.term_as(env));
-    match resnum {
-        0 => {
-            let p: ResourcePtr<i32> = try!(resterm.term_as(env));
-            Ok((*p).as_term(env))
-        },
-        _ => Err(Error::Badarg),
-    }
-}
+// fn render_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
+//     let (resnum, resterm):(i32, Term) = try!(args.from_term(env));
+//     match resnum {
+//         0 => {
+//             let p: ResourcePtr<i32> = try!(resterm.from_term(env));
+//             Ok((*p).to_term(env))
+//         },
+//         _ => Err(Error::Badarg),
+//     }
+// }
 
-fn mutate_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (resnum, resterm, valterm):(i32, Term, Term) = try!(args.term_as(env));
-    Err(Error::Badarg)
-}
+// fn mutate_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
+//     let (resnum, resterm, valterm):(i32, Term, Term) = try!(args.from_term(env));
+//     Err(Error::Badarg)
+// }
 
 
-fn reverse_binary(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (binterm,):(Term,) = try!(args.term_as(env));
+// fn reverse_binary(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
+//     let (binterm,):(Term,) = try!(args.from_term(env));
 
-    let oldslice: &[u8] = try!(binterm.term_as(env));
-    let (newterm, newslice) = new_binary(env, oldslice.len());
+//     let oldslice: &[u8] = try!(binterm.from_term(env));
+//     let (newterm, newslice) = new_binary(env, oldslice.len());
 
-    let mut newiter = newslice.iter_mut();
+//     let mut newiter = newslice.iter_mut();
 
-    for old in oldslice.iter().rev() {
-        *(newiter.next().unwrap()) = *old;
-    }
-    Ok(newterm)
-}
+//     for old in oldslice.iter().rev() {
+//         *(newiter.next().unwrap()) = *old;
+//     }
+//     Ok(newterm)
+// }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// really old stuff....
 
 // static mut store_atom_storage:Option<Term<'static>> = None;
 // unsafe_wrapper!(store_atom_wrapper, store_atom);

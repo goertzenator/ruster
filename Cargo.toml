@@ -8,8 +8,20 @@ repository = "https://github.com/goertzenator/ruster"
 license = "MIT/Apache-2.0"
 keywords = ["FFI", "Erlang", "NIF"]
 
+categories = ["external-ffi-bindings"]
+
+[badges]
+travis-ci = { repository = "https://github.com/goertzenator/ruster" }
+appveyor  = { repository = "https://github.com/goertzenator/ruster" }
+
 [dependencies]
-erlang_nif-sys = "0.5"
+#erlang_nif-sys = "0.6"
+erlang_nif-sys = { path = "/home/goertzen/erlang_nif-sys" }
+
+[dev-dependencies]
+walkdir = "1.0"
+itertools = "0.5"
+cargo-erlangapp = "0.1"
 
 [lib]
 doctest = false

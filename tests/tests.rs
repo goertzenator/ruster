@@ -15,6 +15,10 @@ use std::process::Command;
 fn do_test() {
 
 
+    // for v in std::env::vars() {
+    //     println!("{:?}",v);
+    // }
+
     // get working directory where we can create files
     let out_dir = env::var("OUT_DIR").unwrap();
 
