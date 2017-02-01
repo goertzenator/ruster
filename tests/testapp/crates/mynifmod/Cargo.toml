@@ -8,4 +8,4 @@ name = "mynifmod"
 crate-type = ["dylib"]
 
 [dependencies]
-ruster = { path = "../../../../../../../../" }  #please don't judge me
+ruster = { path = "../../../../" }  #please don't judge me

@@ -30,13 +30,13 @@ macro_rules! platform_nif_init {
     ($get_entry:expr) => (
         #[cfg(unix)]
         #[no_mangle]
-        pub extern "C" fn nif_init() -> *const $crate::erlang_nif_sys_alias::ErlNifEntry {
+        pub extern "C" fn nif_init() -> *const $crate::erlang_nif_sys_api::ErlNifEntry {
             $get_entry()
         }
 
         #[cfg(windows)]
         #[no_mangle]
-        pub extern "C" fn nif_init(callbacks: *mut $crate::erlang_nif_sys_alias::TWinDynNifCallbacks) -> *const $crate::erlang_nif_sys_alias::ErlNifEntry {
+        pub extern "C" fn nif_init(callbacks: *mut $crate::erlang_nif_sys_api::TWinDynNifCallbacks) -> *const $crate::erlang_nif_sys_api::ErlNifEntry {
             unsafe {
                 WIN_DYN_NIF_CALLBACKS = Some(*callbacks);
             }
@@ -85,7 +85,7 @@ macro_rules! platform_nif_init {
 #[macro_export]
 macro_rules! slice_args {
     ($f:expr) => ( {
-                use $crate::erlang_nif_sys_alias as ens;
+                use $crate::erlang_nif_sys_api as ens;
                 |env: *mut ens::ErlNifEnv, argc: ens::c_int, args: *const ens::ERL_NIF_TERM| -> ens::ERL_NIF_TERM {
                     $f(env, std::slice::from_raw_parts(args, argc as usize))
             }
@@ -105,7 +105,7 @@ macro_rules! get_entry {
 
     ( $module:expr, [$($funcs:tt),*], {$($inits:tt)*} ) => (
         || { // start closure
-            use $crate::erlang_nif_sys_alias as ens;
+            use $crate::erlang_nif_sys_api as ens;
             const FUNCS: &'static [ens::ErlNifFunc] = &[$(make_func_entry!($funcs)),*];
 
             // initialize as much as possible statically
@@ -127,7 +127,7 @@ macro_rules! get_entry {
             let mut entry = unsafe { &mut ENTRY };
 
             // perform dynamic insertions
-            entry.num_of_funcs = FUNCS.len() as $crate::c_int;
+            entry.num_of_funcs = FUNCS.len() as ens::c_int;
             entry.funcs = FUNCS.as_ptr();
             set_optionals!(entry, $($inits)*);
             entry // return static entry reference
@@ -137,7 +137,7 @@ macro_rules! get_entry {
     // For legacy nif_init!() invocation, deprecated
     ($module:expr, $load:expr, $reload:expr, $upgrade:expr, $unload:expr, $($func:expr),* ) => (
         || { // start closure
-            use $crate::erlang_nif_sys_alias as ens;
+            use $crate::erlang_nif_sys_api as ens;
             const FUNCS: &'static [ens::ErlNifFunc] = &[$($func),*];
             static mut ENTRY: ens::ErlNifEntry = ens::ErlNifEntry{
                 major : ens::NIF_MAJOR_VERSION,
@@ -252,8 +252,8 @@ macro_rules! set_optional {
 mod initmacro_namespace_tests {
 
     // explicitly disable for this test:
-    // use erlang_nif_sys_alias::*;
-    use erlang_nif_sys_alias;
+    // use erlang_nif_sys_api::*;
+    use erlang_nif_sys_api;
 
     use std;
     use std::ptr;
@@ -261,18 +261,18 @@ mod initmacro_namespace_tests {
     use std::ffi::{CString, CStr};
 
     // Initializer tests
-    fn load(_env: *mut erlang_nif_sys_alias::ErlNifEnv, _priv_data: *mut *mut erlang_nif_sys_alias::c_void, _load_info: erlang_nif_sys_alias::ERL_NIF_TERM) -> erlang_nif_sys_alias::c_int {
+    fn load(_env: *mut erlang_nif_sys_api::ErlNifEnv, _priv_data: *mut *mut erlang_nif_sys_api::c_void, _load_info: erlang_nif_sys_api::ERL_NIF_TERM) -> erlang_nif_sys_api::c_int {
         14
     }
 
-    fn unload(_env: *mut erlang_nif_sys_alias::ErlNifEnv, _priv_data: *mut erlang_nif_sys_alias::c_void) {}
+    fn unload(_env: *mut erlang_nif_sys_api::ErlNifEnv, _priv_data: *mut erlang_nif_sys_api::c_void) {}
 
 
-    fn raw_nif1(_env: *mut erlang_nif_sys_alias::ErlNifEnv, argc: erlang_nif_sys_alias::c_int, _args: *const erlang_nif_sys_alias::ERL_NIF_TERM) -> erlang_nif_sys_alias::ERL_NIF_TERM {
+    fn raw_nif1(_env: *mut erlang_nif_sys_api::ErlNifEnv, argc: erlang_nif_sys_api::c_int, _args: *const erlang_nif_sys_api::ERL_NIF_TERM) -> erlang_nif_sys_api::ERL_NIF_TERM {
         (argc*7) as usize
     }
 
-    fn slice_nif(_env: *mut erlang_nif_sys_alias::ErlNifEnv, args: &[erlang_nif_sys_alias::ERL_NIF_TERM]) -> erlang_nif_sys_alias::ERL_NIF_TERM {
+    fn slice_nif(_env: *mut erlang_nif_sys_api::ErlNifEnv, args: &[erlang_nif_sys_api::ERL_NIF_TERM]) -> erlang_nif_sys_api::ERL_NIF_TERM {
         args.len() * 17
     }
 
@@ -312,7 +312,7 @@ mod initmacro_namespace_tests {
 
 #[cfg(test)]
 mod initmacro_tests {
-    use erlang_nif_sys_alias::*;
+    use erlang_nif_sys_api::*;
     use std;
     use std::ptr;
     use std::slice;

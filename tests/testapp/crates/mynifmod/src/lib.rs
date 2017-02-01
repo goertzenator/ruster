@@ -6,29 +6,33 @@
 #[macro_use]
 extern crate ruster as nif;
 
-use nif::{Env, Term, CTerm, AsTerm, TermAs, OwnedEnv, Atom};
-use nif::{open_resource_type, new_binary, ResourcePtr, Error};
-use nif::{selfpid, send_from_process};
-use erlang_nif_sys::{enif_priv_data, c_void, c_int};
+use nif::{Env, Term, ToTerm, FromTermSlice};
+// use nif::{open_resource_type, new_binary, ResourcePtr, Error};
+// use nif::{selfpid, send_from_process};
+//use nif::erlang_nif_sys::{enif_priv_data, c_void, c_int};
 
-use std::cell::Cell;
+//use std::cell::Cell;
 
 /// Create NIF module data and init function.
-nif_init!("test_nif", [
-        ("dynamic_atom",    0, ruster_fn!(dynamic_atom_wrapper)),
-        ("prebuilt_atom",   0, ruster_fn!(prebuilt_atom_wrapper)),
-        ("int",             0, ruster_fn!(int_wrapper)),
-        ("doubleit",        1, ruster_fn!(doubleit_wrapper)),
-        ("selfsend",        0, ruster_fn!(selfsend_wrapper)),
-        ("decode_int",      1, ruster_fn!(decode_int_wrapper)),
-        ("tuple_math",      1, ruster_fn!(tuple_math_wrapper)),
-        ("param2tuple",     2, ruster_fn!(param2tuple_wrapper)),
+nif_init!("mynifmod", [
+        // ("dynamic_atom",    0, ruster_fn!(dynamic_atom_wrapper)),
+        // ("prebuilt_atom",   0, ruster_fn!(prebuilt_atom_wrapper)),
+        ("int",             0, ruster_fn!(int)),
+        ("add_ints1",       2, ruster_fn!(add_ints1)),
+        ("tuple1",          1, ruster_fn!(tuple1)),
+        ("tuple2",          4, ruster_fn!(tuple2)),
+
+        // ("doubleit",        1, ruster_fn!(doubleit_wrapper)),
+        // ("selfsend",        0, ruster_fn!(selfsend_wrapper)),
+        // ("decode_int",      1, ruster_fn!(decode_int_wrapper)),
+        // ("tuple_math",      1, ruster_fn!(tuple_math_wrapper)),
+        // ("param2tuple",     2, ruster_fn!(param2tuple_wrapper)),
         // ("make_resource",   1, ruster_fn!(make_resource_wrapper)),
         // ("render_resource", 2, ruster_fn!(render_resource_wrapper)),
         // ("mutate_resource", 3, ruster_fn!(mutate_resource_wrapper)),
         // ("reverse_binary",  1, ruster_fn!(reverse_binary_wrapper)),
     ],
-    {load: load, unload: unload}
+    {}
 );
 
 
@@ -40,23 +44,23 @@ nif_init!("test_nif", [
 // NIF Private Data
 
 
-struct PrivData {
-    prebuilt_atom: Atom,
-}
+// struct PrivData {
+//     prebuilt_atom: Atom,
+// }
 
-impl PrivData {
-    fn new(env: &mut Env) -> PrivData {
-        PrivData {
-            prebuilt_atom: Atom::new(env, "prebuilt_atom"),
-        }
-    }
-}
+// impl PrivData {
+//     fn new(env: &mut Env) -> PrivData {
+//         PrivData {
+//             prebuilt_atom: Atom::new(env, "prebuilt_atom"),
+//         }
+//     }
+// }
 
-fn get_priv_data(env: &mut Env) -> &'static PrivData {
-    unsafe {
-        &*(enif_priv_data(env) as *mut PrivData)
-    }
-}
+// fn get_priv_data(env: &mut Env) -> &'static PrivData {
+//     unsafe {
+//         &*(enif_priv_data(env) as *mut PrivData)
+//     }
+// }
 
 // #[derive(Debug)]
 // struct Droppable;
@@ -68,72 +72,105 @@ fn get_priv_data(env: &mut Env) -> &'static PrivData {
 // }
 
 
-fn load(penv: *mut Env,
-                   priv_data: *mut *mut c_void,
-                   _load_info: CTerm)-> c_int {
+// fn load(penv: *mut Env,
+//                    priv_data: *mut *mut c_void,
+//                    _load_info: CTerm)-> c_int {
 
-    let env = unsafe{ &mut *penv };
-    let data = Box::new(PrivData::new(env));
-    unsafe{ *priv_data = Box::into_raw(data) as *mut c_void; }
+//     let env = unsafe{ &mut *penv };
+//     let data = Box::new(PrivData::new(env));
+//     unsafe{ *priv_data = Box::into_raw(data) as *mut c_void; }
 
-    unsafe {
-        open_resource_type::<i32>(env, "i32").unwrap();
-        open_resource_type::<Cell<i32>>(env, "Cell<i32>").unwrap();
-    }
-    0
-}
+//     unsafe {
+//         open_resource_type::<i32>(env, "i32").unwrap();
+//         open_resource_type::<Cell<i32>>(env, "Cell<i32>").unwrap();
+//     }
+//     0
+// }
 
-fn unload(_penv: *mut Env,
-                     priv_data: *mut c_void) {
-    unsafe {
-        Box::from_raw(priv_data as *mut PrivData); // rebox and drop
-    }
-}
+// fn unload(_penv: *mut Env,
+//                      priv_data: *mut c_void) {
+//     unsafe {
+//         Box::from_raw(priv_data as *mut PrivData); // rebox and drop
+//     }
+// }
 
-fn dynamic_atom(env: &mut Env, _args:&[Term]) -> nif::Result<Term> {
-    Ok(Atom::new(env, "an_atom").to_term(env))
-}
+// fn dynamic_atom(env: &mut Env, _args:&[Term]) -> nif::Result<Term> {
+//     Ok(Atom::new(env, "an_atom").to_term(env))
+// }
 
-fn prebuilt_atom(env: &mut Env, _args:&[Term]) -> nif::Result<Term> {
-    Ok(get_priv_data(env).prebuilt_atom.to_term(env))
-}
+// fn prebuilt_atom(env: &mut Env, _args:&[Term]) -> nif::Result<Term> {
+//     Ok(get_priv_data(env).prebuilt_atom.to_term(env))
+// }
 
-fn int(env: &mut Env, _args: &[Term]) -> nif::Result<Term> {
+
+
+// fn term_scope<'a>(env: &'a mut Env, args: &[Term]) -> nif::Result<Term<'a>> {
+//     // Term scope test.  Try to store term in static data.  Must not compile.
+//     static mut STATIC_TERM : Option<Term<'static>> = None;
+//     unsafe { STATIC_TERM = Some(args[0]); }
+//     Ok(12345.to_term(env))
+// }
+
+
+
+
+
+
+fn int<'a>(env: &'a Env, _args: &[Term]) -> nif::Result<Term<'a>> {
     Ok(12345.to_term(env))
 }
 
-fn doubleit(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (f,):(f64,) = try!(args.from_term(env));
-    Ok((f*2.0).to_term(env))
-}
-
-fn selfsend(env: &mut Env, _args: &[Term]) -> nif::Result<Term> {
-    let to_pid = selfpid(env);
-    let mut msg_env = OwnedEnv::new();
-    let msg = 9998.to_term(msg_env.as_mut());
-    unsafe{ send_from_process(env, &to_pid, msg_env, msg).unwrap() };
-    Ok(AsTerm::term_from(env, &0))
-    //Ok(0.to_term(env))
+fn add_ints1<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
+    let a:i32 = try!(args[0].from_term(env));
+    let b:i32 = try!(args[1].from_term(env));
+    Ok((a+b).to_term(env))
 }
 
 
-fn decode_int(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    //let num:i32 = try!(FromTerm::from_term(env, args[0]));
-    let num:i32 = try!(args[0].from_term(env));
-    Ok( (num * 2).to_term(env) )
+fn tuple1<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
+    let (a, b, c, d) : (i32, u32, i64, u64) = try!(args[0].from_term(env));
+
+    Ok( (d, a, b, c).to_term(env) )
 }
 
+fn tuple2<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
+    let (a, b, c, d) : (i32, u32, i64, u64) = try!(FromTermSlice::from_termslice(env, args));
 
-
-fn tuple_math(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (a,b):(i32, i32) = try!(args[0].from_term(env));
-    Ok( (a+10, b*2).to_term(env) )
+    Ok( (b, c, d, a).to_term(env) )
 }
 
-fn param2tuple(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-    let (a,b):(i32, i32) = try!(args.from_term(env));
-    Ok( (a+10, b*2).to_term(env) )
-}
+// fn doubleit(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
+//     let (f,):(f64,) = try!(args.from_term(env));
+//     Ok((f*2.0).to_term(env))
+// }
+
+// fn selfsend(env: &mut Env, _args: &[Term]) -> nif::Result<Term> {
+//     let to_pid = selfpid(env);
+//     let mut msg_env = OwnedEnv::new();
+//     let msg = 9998.to_term(msg_env.as_mut());
+//     unsafe{ send_from_process(env, &to_pid, msg_env, msg).unwrap() };
+//     Ok(AsTerm::term_from(env, &0))
+//     //Ok(0.to_term(env))
+// }
+
+
+// fn decode_int(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
+//     //let num:i32 = try!(FromTerm::from_term(env, args[0]));
+//     let num:i32 = try!(args[0].from_term(env));
+//     Ok( (num * 2).to_term(env) )
+// }
+
+
+
+// fn tuple_math(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
+//     let (a,b):(i32, i32) = try!(args[0].from_term(env));
+//     Ok( (a+10, b*2).to_term(env) )
+// }
+
+// fn param2tuple(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
+//     let (a,b):(i32, i32) = try!(args.from_term(env));
+//     Ok( (a+10, b*2).to_term(env) )
+// }
 
 
 // fn make_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {

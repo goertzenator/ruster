@@ -1,6 +1,7 @@
 extern crate walkdir;
 extern crate itertools;
 extern crate cargo_erlangapp;
+//extern crate tempdir;
 
 //use cargo_erlangapp::{Target, target_filenames};
 //use std::ffi::{OsStr};
@@ -20,27 +21,29 @@ fn do_test() {
     // }
 
     // get working directory where we can create files
-    let out_dir = env::var("OUT_DIR").unwrap();
-
-
+    //let out_dir = env::var("OUT_DIR").unwrap();
+    //if let Ok(out_dir) = tempdir::TempDir::new("temp_app_test") {
     // find the directory for the Erlang test application
-    let mut appdir_src = PathBuf::new();
-    appdir_src.push("tests");
-    appdir_src.push("testapp");
+    // let mut appdir_src = PathBuf::new();
+    // appdir_src.push("tests");
+    // appdir_src.push("testapp");
 
-    // copy application to working dir
-    copy_all(&appdir_src, &out_dir).unwrap();
+    // // copy application to working dir
+    // copy_all(&appdir_src, &out_dir).unwrap();
 
     // get working dir for Erlang test application
-    let mut appdir = PathBuf::new();
-    appdir.push(&out_dir);
+//    let mut appdir = PathBuf::new();
+    let mut appdir = env::current_dir().unwrap();
+    //appdir.push(&out_dir);
+    appdir.push("tests");
     appdir.push("testapp");
 
 
-    let escript = env::var("ESCRIPT").unwrap_or("escript".to_string());
-
     // build test crate
+    println!("appdir = {:?}", appdir);
     invoke_erlangapp(&["cargo-erlangapp", "build" ], &appdir);
+
+    let escript = env::var("ESCRIPT").unwrap_or("escript".to_string());
 
     // compile and run erlang eunit tests
     match Command::new(escript).current_dir(&appdir).arg("dotest.escript").status().expect("failed to execute escript").success() {

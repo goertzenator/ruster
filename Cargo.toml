@@ -22,6 +22,7 @@ erlang_nif-sys = { path = "/home/goertzen/erlang_nif-sys" }
 walkdir = "1.0"
 itertools = "0.5"
 cargo-erlangapp = "0.1"
+tempdir = "0.3"
 
 [lib]
 doctest = false

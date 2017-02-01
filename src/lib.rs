@@ -99,11 +99,12 @@ Use of `Env` is not threadsafe, hence it lacks the `Sync` trait.
 
 
 //#[macro_use]
-extern crate erlang_nif_sys;
+pub extern crate erlang_nif_sys;
 
-//use erlang_nif_sys::*; // no good, can't declare new erlang_nif_sys_alias
 use erlang_nif_sys as ens;
-use erlang_nif_sys as erlang_nif_sys_api;
+
+// required for macros to work
+pub use erlang_nif_sys as erlang_nif_sys_api;
 
 
 /*
@@ -126,249 +127,84 @@ Env and Term constraints
 */
 
 
-// #[macro_use]
-// mod initmacro;
+#[macro_use]
+mod initmacro;
 
-// pub use erlang_nif_sys::ErlNifEnv as Env;
-// pub use erlang_nif_sys::ErlNifPid as Pid;
-
-use std::result;
-
-
-// // Term types traits
-// trait HoldsEnvItem {
-// 	fn new(env: *ErlNifEnv, cterm: &T) -> Self;
-// 	fn get_cterm(env: *ErlNifEnv) -> &T;
-// }
-
-
-// struct<T> CheckedContainer {}   impl HoldsEnvItem;  T=ERL_NIF_TERM
-// struct<T> UncheckedContainer {} impl HoldsEnvItem;
-
-// type Term = CheckedContainer<ERL_NIF_TERM>;
-// type Term = UncheckedContainer<ERL_NIF_TERM>;
-// type TermSlice = CheckedContainer<&[ERL_NIF_TERM]>;
-// type TermSlice = UncheckedContainer<&[ERL_NIF_TERM]>;
-
-
-
-
-// // Data traits
-// trait FromTerm {
-// 	fn from_term(term: Term, env: Env) -> Self;
-// }
-
-// trait ToTerm {
-// 	fn to_term(&self, env: Env) -> Term;
-// }
-
-
-
-// // not really data...
-// impl Term {
-// 	fn from_term(&self, env: Env) -> T:FromTerm {
-// 		FromTerm::
-// 	}
-// }
-
-
-
-// // These tuple imps are not traits, just plain impls.
-// //
-
-// impl<T0: CTerm, T1: CTerm> CTerm for (T0, T1,) {
-// 	fn as_term(&self, env: &mut Env) -> CTerm {
-// 		let terms = [self.0.as_term(env), self.1.as_term(env)];
-// 		terms.as_ref().as_term(env)
-// 	}
-// }
-// impl<T0: FromTerm<CTerm>, T1: FromTerm<CTerm>> FromTerm<CTerm> for (T0, T1,) {
-// 	fn from_term(env: &mut Env, term: CTerm) -> Result<Self> {
-// 		let terms:&[CTerm] = try!(term.term_as(env));
-// 		FromTerm::from_term(env, terms)
-// 	}
-// }
-
-// impl<'a, T0: FromTerm<CTerm>, T1: FromTerm<CTerm>> FromTerm<&'a [CTerm]> for (T0, T1,) {
-// 	fn from_termslic(eenv: &mut Env, terms: &[CTerm]) -> Result<Self> {
-// 		if terms.len() != 2 { return Err(Error::Badarg) };
-// 		Ok((
-// 			try!(terms[0].term_as(env)), try!(terms[1].term_as(env)),
-// 		))
-// 	}
-// }
-
-
-
-// struct UncheckedTerm {}
-// struct CheckedTerm {}
-// struct EnvlessTerm {}   // struct or trait?
-
-// impl CTerm for UncheckedTerm {
-
-// }
-
-// impl CTerm for CheckedTerm {
-
-// }
-
-// impl CTerm for EnvlessTerm {
-
-// }
-
-// impl EnvlessTerm {
-// 	fn new_noenv(cterm: ERL_NIF_TERM) -> Self;
-// 	fn get_cterm_noenv() -> ERL_NIF_TERM;
-// }}
-
-
+pub use erlang_nif_sys::ErlNifEnv as Env;
+pub use erlang_nif_sys::ErlNifPid as Pid;
 
 
 /// Convenience name for low level term type.
 pub use erlang_nif_sys::ERL_NIF_TERM as CTerm;
 
 
-pub type CTermSlice<'a> = &'a [CTerm];
-
-/// Marker trait for types that can have runtime environment checking
-pub trait Checkable: Copy {}
-
-impl Checkable for CTerm {}
-impl<'a> Checkable for CTermSlice<'a> {}
-
-
-/// Abstract Erlang term type.
-///
-/// This type may represent either an unchecked or checked term, depending on whether the build type
-/// is debug or release.  Users should use this type for maximum bug discoverability during development,
-/// and maximum execution speed during deployment.
-#[cfg(debug_assertions)]
-pub type Term = Checked<CTerm>;
-
-
-/// Abstract Erlang term slice type.
-///
-/// Similar to Term, but represents a slice of Terms.  Used for NIF parameter unpacking
-/// and tuple manipulation.
-#[cfg(debug_assertions)]
-pub type TermSlice<'a> = Checked<CTermSlice<'a>>;
-
-#[cfg(not(debug_assertions))]
-pub type Term = CTerm;
-#[cfg(not(debug_assertions))]
-pub type TermSlice<'a> = CTermSlice<'a>;
-
-
-pub type Term = Checked<CTerm>;
-pub type TermSlice = Checked<CTermSlice>;
-
-
-/// Wrapper type for automatic environment checking
-///
-/// This wrapper is not meant for the library user.
-/// This wrapper bundles an Env pointer alongside a CTerm or CTermSlice
-/// so that usages of this term can be checked against the provided environment.
-/// A mismatched environment results in a `panic!`.
-#[derive(Copy, Clone, Debug)]
-pub struct Checked<T> where
-	T: Checkable {
-	termlike: T,
-	env: *mut Env,
+#[derive(Copy, Clone)]
+pub struct Term<'a> {
+	term: CTerm,
+    _env: std::marker::PhantomData<&'a Env>,
 }
 
+// struct OwnedEnv {
+// 	env: *mut Env,
+// }
 
-impl<T> Checked<T> where
-	T: Checkable {
+// pub struct MobileTerm {
+// 	env: OwnedEnv,
+// 	term: CTerm,
+// }
 
-	/// Bundle environment with Checkable instance.
-	fn new(env: *mut Env, termlike: T) -> Self {
-		Checked {
-			termlike: termlike,
-			env: env,
-		}
+
+use std::result;
+
+
+
+impl<'a> Term<'a> {
+	fn new(ct: CTerm) -> Term<'a> {
+		Term { term: ct, _env: std::marker::PhantomData }
 	}
 
-	/// Validate environment and return Checkable instance
-	fn get(&self, env: *mut Env) -> T {
-		if env == self.env {
-			self.termlike
-		} else {
-			panic!("Term used with wrong environment.")
-		}
-	}
-	// fn get_unchecked(&self) -> T {
-	// 	self.termlike
+	// fn get(&self) -> CTerm {
+	// 	self.term
 	// }
 }
 
+// impl From<Term> for CTerm // orphan rule
+
+impl<'a> Into<CTerm> for Term<'a> {
+	fn into(self) -> CTerm {
+		self.term
+	}
+}
 
 
 
-////////////
-// Conversion Traits
-
-pub trait DontCheckEnv {}
 
 /// Convert Rust type to NIF Term
 ///
 /// New types should implement AsTerm<CTerm> and FromTerm<CTerm>.
-pub trait ToTerm<T> {
-	fn to_term(&self, env: &mut Env) -> T;
+pub trait ToTerm {
+//	fn to_term(&self, env: &mut Env) -> Term;
+//	fn to_term<'a, 'b>(&'a self, env: &'b mut Env) -> Term<'a>; // default desugar, wrong!
+	fn to_term<'b>(&self, env: &'b Env) -> Term<'b>;
+//	fn to_term<'a, 'b>(&self, env: &'a mut Env) -> Term<'b> where 'a: 'b;
 }
 
 /// Convert NIF Term to Rust type
 ///
 /// New types should implement AsTerm<CTerm> and FromTerm<CTerm>.
-pub trait FromTerm<T>: Sized {
-	fn from_term(env: &mut Env, term: T) -> Result<Self>;
+pub trait FromTerm: Sized {
+//	fn from_term(env: &mut Env, term: Term) -> Result<Self>;
+//	fn from_term<'a, 'b>(env: &'a mut Env, term: Term<'b>) -> Result<Self>; // default desugar, wrong!
+	fn from_term<'a>(env: &'a Env, term: Term<'a>) -> Result<Self>;
 }
-
-
-/// Blanket `impl` for `Checkable` types.  FIXME: toss Checkable type?
-impl<X, T> ToTerm<Checked<T>> for X
-	where X: ToTerm<T>,
-		T: Checkable {
-	fn to_term(&self, env: &mut Env) -> Checked<T> {
-		let termlike = self.to_term(env);
-		Checked::new(env, termlike)
-	}
-}
-
-/// Blanket `impl` for `Checkable` types.  FIXME: toss Checkable type?
-impl<X, T> FromTerm<Checked<T>> for X
-	where X: FromTerm<T>,
-		T: Checkable {
-	fn from_term(env:&mut Env, checked: Checked<T>) -> Result<Self> {
-		let termlike = checked.get(env);
-		FromTerm::from_term(env, termlike)
-	}
-}
-
-
-/// Enable this when impl specialization lands
-// impl<X> FromTerm<CheckedTerm> for X
-// 	where X: FromTerm<CTerm> + DontCheck {
-// 	fn from_term(env:&mut Env, term: CheckedTerm) -> Result<Self> {
-// 		let cterm = term.get_unchecked();
-// 		FromTerm::from_term(env, cterm)
-// 	}
-// }
-
-
 
 /// Convenience trait for converting NIF Terms to Rust types.
 ///
 /// This trait has a blanket impl for type implementing `FromTerm`.
 /// For new types, implement `FromTerm<CTerm>`.
-pub trait TermFromTerm<X> {
-	fn from_term(self, env: &mut Env) -> Result<X>;
-}
-
-
-impl<X, T> TermFromTerm<X> for T
-	where X: FromTerm<T> {
-	fn from_term(self, env: &mut Env) -> Result<X> {
-		X::from_term(env, self)
+impl<'a> Term<'a> {
+	pub fn from_term<T>(&'a self, env: &'a Env) -> Result<T> where T: FromTerm {
+		FromTerm::from_term(env, *self)
 	}
 }
 
@@ -595,75 +431,92 @@ pub type Result<T> = result::Result<T, Error>;
 ////////////
 // Basic types
 
-pub trait SimpleConvertible: Copy {
-	//unsafe fn make(env: *mut Env, val: Self) -> CTerm;
-	//unsafe fn get(env: *mut Env, term: CTerm, val: *mut Self) -> c_int;
-}
+// trait SimpleConvertible: Copy {
+// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm;
+// 	unsafe fn get(env: *mut Env, term: CTerm, val: *mut Self) -> ens::c_int;
+// }
 
-// impl<X> AsTerm<CTerm> for X
+// impl<X> ToTerm for X
 // 	where X: SimpleConvertible {
-// 	fn as_term(&self, env: &mut Env) -> CTerm {
-// 		unsafe{ SimpleConvertible::make(env, *self) }
+// 	fn to_term<'a>(&self, env: &'a mut Env) -> Term<'a> {
+// 		Term::new(	unsafe{SimpleConvertible::make(env, *self)}  )
 // 	}
 // }
 
-// impl<X> FromTerm<CTerm> for X
+// impl<X> FromTerm for X
 // 	where X: SimpleConvertible {
-// 	fn from_term(env: &mut Env, term: CTerm) -> Result<Self> {
+// 	fn from_term(env: &mut Env, term: Term) -> Result<Self> {
 // 		let mut result: Self = unsafe {std::mem::uninitialized()};
-// 		match unsafe {SimpleConvertible::get(env, term, &mut result)} {
+// 		match unsafe {SimpleConvertible::get(env, term.get(), &mut result)} {
 // 			0 => Err(Error::Badarg),
 // 			_ => Ok(result),
 // 		}
 // 	}
 // }
 
-// impl SimpleConvertible for c_int {
+// impl SimpleConvertible for ens::c_int {
 // 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
 // 		ens::enif_make_int(env, val)
 // 	}
-// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
+// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> ens::c_int {
 // 		ens::enif_get_int(env, term, ptr)
 // 	}
 // }
 
 
-// impl SimpleConvertible for c_uint {
-// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-// 		ens::enif_make_uint(env, val)
-// 	}
-// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
-// 		ens::enif_get_uint(env, term, ptr)
+
+// fn from_term_helper<T>(env: *mut Env, term: Term, f: unsafe extern "C" fn(*mut Env, CTerm, *mut T) -> ens::c_int ) -> Result<T> {
+// 	let mut result: T = unsafe {std::mem::uninitialized()};
+// 	match unsafe{f(env, term.into(), &mut result)} {
+// 		0 => Err(Error::Badarg),
+// 		_ => Ok(result),
 // 	}
 // }
 
-// impl SimpleConvertible for c_double {
-// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-// 		ens::enif_make_double(env, val)
-// 	}
-// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
-// 		ens::enif_get_double(env, term, ptr)
+// fn to_term_helper<'a, T>(env: &'a mut Env, data: T, f: unsafe extern "C" fn(*mut Env, T) -> ens::ERL_NIF_TERM ) -> Term<'a> {
+// 	Term::new(	unsafe{f(env, data)}  )
+// }
+
+// impl ToTerm for ens::c_int {
+// 	fn to_term<'a>(&self, env: &'a mut Env) -> Term<'a> {
+// 		to_term_helper(env, *self, ens::enif_make_int)
+// 		//Term::new(	unsafe{ens::enif_make_int(env, *self)}  )
 // 	}
 // }
 
-// impl SimpleConvertible for i64 {
-// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-// 		ens::enif_make_int64(env, val)
-// 	}
-// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
-// 		ens::enif_get_int64(env, term, ptr)
+// impl FromTerm for ens::c_int {
+// 	fn from_term(env: &mut Env, term: Term) -> Result<Self> {
+// 		from_term_helper(env, term, ens::enif_get_int)
 // 	}
 // }
 
-// impl SimpleConvertible for u64 {
-// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-// 		ens::enif_make_uint64(env, val)
-// 	}
-// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> c_int {
-// 		ens::enif_get_uint64(env, term, ptr)
-// 	}
-// }
 
+macro_rules! impl_simple_conversion {
+    ($datatype:ty, $to:expr, $from:expr) => (
+
+		impl ToTerm for $datatype {
+			fn to_term<'a>(&self, env: &'a Env) -> Term<'a> {
+				Term::new(	unsafe{$to(std::mem::transmute(env), *self)}  )
+			}
+		}
+
+		impl FromTerm for $datatype {
+			fn from_term<'a>(env: &'a Env, term: Term<'a>) -> Result<Self> {
+				let mut result = unsafe {std::mem::uninitialized()};
+				match unsafe{$from(std::mem::transmute(env), term.into(), &mut result)} {
+					0 => Err(Error::Badarg),
+					_ => Ok(result),
+				}
+			}
+		}
+    );
+}
+
+impl_simple_conversion!(ens::c_int,    ens::enif_make_int,    ens::enif_get_int);
+impl_simple_conversion!(ens::c_uint,   ens::enif_make_uint,   ens::enif_get_uint);
+impl_simple_conversion!(ens::c_double, ens::enif_make_double, ens::enif_get_double);
+impl_simple_conversion!(i64,           ens::enif_make_int64,  ens::enif_get_int64);
+impl_simple_conversion!(u64,           ens::enif_make_uint64, ens::enif_get_uint64);
 
 
 
@@ -718,8 +571,8 @@ pub trait SimpleConvertible: Copy {
 // Erlang tuple as tuple
 
 
-// mod tuple;
-// pub use tuple::*;
+mod tuple;
+pub use tuple::*;
 
 
 ////////////
@@ -837,8 +690,8 @@ macro_rules! ruster_fn {
     ($f:expr) => ( {
                 use $crate::erlang_nif_sys as ens;
                 |env: *mut ens::ErlNifEnv, argc: ens::c_int, args: *const ens::ERL_NIF_TERM| -> ens::ERL_NIF_TERM {
-			        match $f(&mut *env, std::slice::from_raw_parts(args, argc as usize)) {
-			            Ok(rterm) => rterm,
+			        match $f(&*env, std::slice::from_raw_parts(std::mem::transmute(args), argc as usize)) {
+			            Ok(rterm) => rterm.into(),
 			            _         => ens::enif_make_badarg(env),
 			        }
 			    }
@@ -847,6 +700,16 @@ macro_rules! ruster_fn {
 }
 
 
+// from experiments: note use of hrtb
+// fn execute_nif<F>(f: F)
+//     where F: for<'a>  Fn(&'a Env, &'a[Term<'a>]) -> Term<'a> {
+
+//     let env = Env{};
+//     let terms = [Term{ marker: PhantomData }, Term{ marker: PhantomData }];
+
+//     f(&env, &terms);
+//     //println!("got {:?}", r);
+// }
 
 
 // #[macro_export]
