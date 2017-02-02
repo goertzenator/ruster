@@ -97,7 +97,6 @@ Use of `Env` is not threadsafe, hence it lacks the `Sync` trait.
 !*/
 
 
-
 //#[macro_use]
 pub extern crate erlang_nif_sys;
 
@@ -181,32 +180,80 @@ impl<'a> Into<CTerm> for Term<'a> {
 
 /// Convert Rust type to NIF Term
 ///
-/// New types should implement AsTerm<CTerm> and FromTerm<CTerm>.
-pub trait ToTerm {
-//	fn to_term(&self, env: &mut Env) -> Term;
-//	fn to_term<'a, 'b>(&'a self, env: &'b mut Env) -> Term<'a>; // default desugar, wrong!
-	fn to_term<'b>(&self, env: &'b Env) -> Term<'b>;
-//	fn to_term<'a, 'b>(&self, env: &'a mut Env) -> Term<'b> where 'a: 'b;
+
+
+pub struct Binder<'a, 'b, T:'a> {
+    env: &'b Env,
+    val: &'a T,
 }
 
-/// Convert NIF Term to Rust type
-///
-/// New types should implement AsTerm<CTerm> and FromTerm<CTerm>.
-pub trait FromTerm: Sized {
-//	fn from_term(env: &mut Env, term: Term) -> Result<Self>;
-//	fn from_term<'a, 'b>(env: &'a mut Env, term: Term<'b>) -> Result<Self>; // default desugar, wrong!
-	fn from_term<'a>(env: &'a Env, term: Term<'a>) -> Result<Self>;
+pub trait Bindable
+    where Self: Sized {
+    fn bind<'a, 'b>(&'a self, env: &'b Env) -> Binder<'a, 'b, Self>;
 }
 
-/// Convenience trait for converting NIF Terms to Rust types.
-///
-/// This trait has a blanket impl for type implementing `FromTerm`.
-/// For new types, implement `FromTerm<CTerm>`.
-impl<'a> Term<'a> {
-	pub fn from_term<T>(&'a self, env: &'a Env) -> Result<T> where T: FromTerm {
-		FromTerm::from_term(env, *self)
-	}
+impl<T> Bindable for T {
+    fn bind<'a, 'b>(&'a self, env: &'b Env) -> Binder<'a, 'b, Self> {
+        Binder{env: env, val: self}
+    }
 }
+
+
+// This is just https://doc.rust-lang.org/std/convert/trait.TryFrom.html
+// It is repeated here because:
+//   1. At this time the trait is marked unstable.
+//   2. External traits cannot be implemented for tuples (https://github.com/rust-lang/rust/issues/31682)
+//
+// Once both these issues are corrected then this can be replaced with std::convert::TryFrom
+//
+
+pub trait TryFrom<T>: Sized {
+    /// The type returned in the event of a conversion error.
+    type Err;
+
+    /// Performs the conversion.
+    fn try_from(T) -> std::result::Result<Self, Self::Err>;
+}
+pub trait TryInto<T>: Sized {
+    /// The type returned in the event of a conversion error.
+    type Err;
+
+    /// Performs the conversion.
+    fn try_into(self) -> std::result::Result<T, Self::Err>;
+}
+impl<T, U> TryInto<U> for T where U: TryFrom<T> {
+    type Err = U::Err;
+
+    fn try_into(self) -> std::result::Result<U, U::Err> {
+        U::try_from(self)
+    }
+}
+
+// pub trait ToTerm {
+// //	fn to_term(&self, env: &mut Env) -> Term;
+// //	fn to_term<'a, 'b>(&'a self, env: &'b mut Env) -> Term<'a>; // default desugar, wrong!
+// 	fn to_term<'b>(&self, env: &'b Env) -> Term<'b>;
+// //	fn to_term<'a, 'b>(&self, env: &'a mut Env) -> Term<'b> where 'a: 'b;
+// }
+
+// /// Convert NIF Term to Rust type
+// ///
+// /// New types should implement AsTerm<CTerm> and FromTerm<CTerm>.
+// pub trait FromTerm: Sized {
+// //	fn from_term(env: &mut Env, term: Term) -> Result<Self>;
+// //	fn from_term<'a, 'b>(env: &'a mut Env, term: Term<'b>) -> Result<Self>; // default desugar, wrong!
+// 	fn from_term<'a>(env: &'a Env, term: Term<'a>) -> Result<Self>;
+// }
+
+// /// Convenience trait for converting NIF Terms to Rust types.
+// ///
+// /// This trait has a blanket impl for type implementing `FromTerm`.
+// /// For new types, implement `FromTerm<CTerm>`.
+// impl<'a> Term<'a> {
+// 	pub fn from_term<T>(&'a self, env: &'a Env) -> Result<T> where T: FromTerm {
+// 		FromTerm::from_term(env, *self)
+// 	}
+// }
 
 
 
@@ -431,79 +478,25 @@ pub type Result<T> = result::Result<T, Error>;
 ////////////
 // Basic types
 
-// trait SimpleConvertible: Copy {
-// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm;
-// 	unsafe fn get(env: *mut Env, term: CTerm, val: *mut Self) -> ens::c_int;
-// }
-
-// impl<X> ToTerm for X
-// 	where X: SimpleConvertible {
-// 	fn to_term<'a>(&self, env: &'a mut Env) -> Term<'a> {
-// 		Term::new(	unsafe{SimpleConvertible::make(env, *self)}  )
-// 	}
-// }
-
-// impl<X> FromTerm for X
-// 	where X: SimpleConvertible {
-// 	fn from_term(env: &mut Env, term: Term) -> Result<Self> {
-// 		let mut result: Self = unsafe {std::mem::uninitialized()};
-// 		match unsafe {SimpleConvertible::get(env, term.get(), &mut result)} {
-// 			0 => Err(Error::Badarg),
-// 			_ => Ok(result),
-// 		}
-// 	}
-// }
-
-// impl SimpleConvertible for ens::c_int {
-// 	unsafe fn make(env: *mut Env, val: Self) -> CTerm {
-// 		ens::enif_make_int(env, val)
-// 	}
-// 	unsafe fn get(env: *mut Env, term: CTerm, ptr: *mut Self) -> ens::c_int {
-// 		ens::enif_get_int(env, term, ptr)
-// 	}
-// }
-
-
-
-// fn from_term_helper<T>(env: *mut Env, term: Term, f: unsafe extern "C" fn(*mut Env, CTerm, *mut T) -> ens::c_int ) -> Result<T> {
-// 	let mut result: T = unsafe {std::mem::uninitialized()};
-// 	match unsafe{f(env, term.into(), &mut result)} {
-// 		0 => Err(Error::Badarg),
-// 		_ => Ok(result),
-// 	}
-// }
-
-// fn to_term_helper<'a, T>(env: &'a mut Env, data: T, f: unsafe extern "C" fn(*mut Env, T) -> ens::ERL_NIF_TERM ) -> Term<'a> {
-// 	Term::new(	unsafe{f(env, data)}  )
-// }
-
-// impl ToTerm for ens::c_int {
-// 	fn to_term<'a>(&self, env: &'a mut Env) -> Term<'a> {
-// 		to_term_helper(env, *self, ens::enif_make_int)
-// 		//Term::new(	unsafe{ens::enif_make_int(env, *self)}  )
-// 	}
-// }
-
-// impl FromTerm for ens::c_int {
-// 	fn from_term(env: &mut Env, term: Term) -> Result<Self> {
-// 		from_term_helper(env, term, ens::enif_get_int)
-// 	}
-// }
 
 
 macro_rules! impl_simple_conversion {
     ($datatype:ty, $to:expr, $from:expr) => (
 
-		impl ToTerm for $datatype {
-			fn to_term<'a>(&self, env: &'a Env) -> Term<'a> {
-				Term::new(	unsafe{$to(std::mem::transmute(env), *self)}  )
+		impl<'a, 'b> From<Binder<'a, 'b, $datatype>> for Term<'b> {
+			fn from(b: Binder<$datatype>) -> Self {
+				Term::new(	unsafe{$to(std::mem::transmute(b.env), *b.val)}  )
 			}
+			// fn to_term<'a>(&self, env: &'a Env) -> Term<'a> {
+			// 	Term::new(	unsafe{$to(std::mem::transmute(env), *self)}  )
+			// }
 		}
 
-		impl FromTerm for $datatype {
-			fn from_term<'a>(env: &'a Env, term: Term<'a>) -> Result<Self> {
+		impl<'a, 'b> TryFrom<Binder<'a, 'b, Term<'a>>> for $datatype {
+			type Err = Error;
+			fn try_from(b: Binder<Term>) -> Result<Self> {
 				let mut result = unsafe {std::mem::uninitialized()};
-				match unsafe{$from(std::mem::transmute(env), term.into(), &mut result)} {
+				match unsafe{$from(std::mem::transmute(b.env), (*b.val).into(), &mut result)} {
 					0 => Err(Error::Badarg),
 					_ => Ok(result),
 				}
@@ -511,6 +504,7 @@ macro_rules! impl_simple_conversion {
 		}
     );
 }
+
 
 impl_simple_conversion!(ens::c_int,    ens::enif_make_int,    ens::enif_get_int);
 impl_simple_conversion!(ens::c_uint,   ens::enif_make_uint,   ens::enif_get_uint);

@@ -3,10 +3,11 @@
 // #[macro_use]
 // extern crate erlang_nif_sys;
 
+
 #[macro_use]
 extern crate ruster as nif;
 
-use nif::{Env, Term, ToTerm, FromTermSlice};
+use nif::{Env, Term, Bindable, TryFrom, TryInto};
 // use nif::{open_resource_type, new_binary, ResourcePtr, Error};
 // use nif::{selfpid, send_from_process};
 //use nif::erlang_nif_sys::{enif_priv_data, c_void, c_int};
@@ -21,6 +22,7 @@ nif_init!("mynifmod", [
         ("add_ints1",       2, ruster_fn!(add_ints1)),
         ("tuple1",          1, ruster_fn!(tuple1)),
         ("tuple2",          4, ruster_fn!(tuple2)),
+        ("tuple0",          2, ruster_fn!(tuple0)),
 
         // ("doubleit",        1, ruster_fn!(doubleit_wrapper)),
         // ("selfsend",        0, ruster_fn!(selfsend_wrapper)),
@@ -104,11 +106,11 @@ nif_init!("mynifmod", [
 
 
 
-// fn term_scope<'a>(env: &'a mut Env, args: &[Term]) -> nif::Result<Term<'a>> {
+// fn term_scope<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
 //     // Term scope test.  Try to store term in static data.  Must not compile.
 //     static mut STATIC_TERM : Option<Term<'static>> = None;
 //     unsafe { STATIC_TERM = Some(args[0]); }
-//     Ok(12345.to_term(env))
+//     Ok(12345.bind(env).into())
 // }
 
 
@@ -117,26 +119,29 @@ nif_init!("mynifmod", [
 
 
 fn int<'a>(env: &'a Env, _args: &[Term]) -> nif::Result<Term<'a>> {
-    Ok(12345.to_term(env))
+    Ok(12345.bind(env).into())
 }
 
 fn add_ints1<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
-    let a:i32 = try!(args[0].from_term(env));
-    let b:i32 = try!(args[1].from_term(env));
-    Ok((a+b).to_term(env))
+    let a:i32 = try!(args[0].bind(env).try_into());
+    let b:i32 = try!(args[1].bind(env).try_into());
+    Ok((a+b).bind(env).into())
 }
 
 
 fn tuple1<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
-    let (a, b, c, d) : (i32, u32, i64, u64) = try!(args[0].from_term(env));
-
-    Ok( (d, a, b, c).to_term(env) )
+    let (a, b, c, d) : (i32, u32, i64, u64) = try!(args[0].bind(env).try_into());
+    Ok( (d, a, b, c).bind(env).into() )
 }
 
 fn tuple2<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
-    let (a, b, c, d) : (i32, u32, i64, u64) = try!(FromTermSlice::from_termslice(env, args));
+    let (a, b, c, d) : (i32, u32, i64, u64) = try!(args.bind(env).try_into());
+    Ok( (b, c, d, a).bind(env).into() )
+}
 
-    Ok( (b, c, d, a).to_term(env) )
+fn tuple0<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
+    let (x,y) : ((),()) = try!(args.bind(env).try_into());
+    Ok( (x,y,()).bind(env).into() )
 }
 
 // fn doubleit(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
