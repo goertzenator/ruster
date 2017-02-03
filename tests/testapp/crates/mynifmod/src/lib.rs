@@ -7,7 +7,7 @@
 #[macro_use]
 extern crate ruster as nif;
 
-use nif::{Env, Term, Bindable, TryFrom, TryInto};
+use nif::{Env, Term, Binary, Bind, TryInto};
 // use nif::{open_resource_type, new_binary, ResourcePtr, Error};
 // use nif::{selfpid, send_from_process};
 //use nif::erlang_nif_sys::{enif_priv_data, c_void, c_int};
@@ -23,6 +23,7 @@ nif_init!("mynifmod", [
         ("tuple1",          1, ruster_fn!(tuple1)),
         ("tuple2",          4, ruster_fn!(tuple2)),
         ("tuple0",          2, ruster_fn!(tuple0)),
+        ("catbin",          2, ruster_fn!(catbin)),
 
         // ("doubleit",        1, ruster_fn!(doubleit_wrapper)),
         // ("selfsend",        0, ruster_fn!(selfsend_wrapper)),
@@ -130,19 +131,42 @@ fn add_ints1<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
 
 
 fn tuple1<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
+    //Ok(12345.bind(env).into())
     let (a, b, c, d) : (i32, u32, i64, u64) = try!(args[0].bind(env).try_into());
     Ok( (d, a, b, c).bind(env).into() )
 }
 
 fn tuple2<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
+    // Ok(12345.bind(env).into())
     let (a, b, c, d) : (i32, u32, i64, u64) = try!(args.bind(env).try_into());
     Ok( (b, c, d, a).bind(env).into() )
 }
 
 fn tuple0<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
+    // Ok(12345.bind(env).into())
     let (x,y) : ((),()) = try!(args.bind(env).try_into());
     Ok( (x,y,()).bind(env).into() )
 }
+
+fn catbin<'a>(env: &'a Env, args: &[Term]) -> nif::Result<Term<'a>> {
+    // unpack args
+    let (a,b): (&[u8], &[u8]) = try!(args.bind(env).try_into());
+
+    // allocate binary
+    let mut bin = Binary::new(a.len() + b.len());
+
+    // copy source binaries into dest
+    bin.as_mut()[..a.len()].clone_from_slice(a);
+    bin.as_mut()[a.len()..].clone_from_slice(b);
+
+    // convert to term
+    let term = bin.bind(env).into();
+
+    //bin.as_mut()[..a.len()].clone_from_slice(a); // musn't compile
+
+    Ok(term)
+}
+
 
 // fn doubleit(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
 //     let (f,):(f64,) = try!(args.from_term(env));

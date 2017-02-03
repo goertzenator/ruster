@@ -47,6 +47,7 @@ add_ints1(_,_)  -> exit(nif_library_not_loaded).
 tuple1(_)       -> exit(nif_library_not_loaded).
 tuple2(_,_,_,_) -> exit(nif_library_not_loaded).
 tuple0(_,_) -> exit(nif_library_not_loaded).
+catbin(_,_) -> exit(nif_library_not_loaded).
 
 
 tests1_test_() -> [
@@ -55,6 +56,7 @@ tests1_test_() -> [
 	?_assertEqual({4,1,2,3}, tuple1({1,2,3,4})),
 	?_assertEqual({2,3,4,1}, tuple2(1,2,3,4)),
 	?_assertEqual({{},{},{}}, tuple0({},{})),
+	?_assertEqual(<<"hellokitty">>, catbin(<<"hello">>,<<"kitty">>)),
 	[]
 	].
 
