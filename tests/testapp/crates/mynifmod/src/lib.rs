@@ -120,18 +120,26 @@ fn priv_data(env: &Env) -> &'static MyType {
 pub mod atom {
     use std;
     use ruster::*;
-    pub const ok: StaticAtom = StaticAtom(0);
-    pub const error: StaticAtom = StaticAtom(1);
-    pub const add: StaticAtom = StaticAtom(2);
-    pub const sub: StaticAtom = StaticAtom(3);
-    pub const mul: StaticAtom = StaticAtom(4);
-    pub const division_by_zero: StaticAtom = StaticAtom(5);
-    pub const div: StaticAtom = StaticAtom(6);
+    pub const OK: StaticAtom = StaticAtom(0);
+    pub const ERROR: StaticAtom = StaticAtom(1);
+    pub const ADD: StaticAtom = StaticAtom(2);
+    pub const SUB: StaticAtom = StaticAtom(3);
+    pub const MUL: StaticAtom = StaticAtom(4);
+    pub const DIVISION_BY_ZERO: StaticAtom = StaticAtom(5);
+    pub const DIV: StaticAtom = StaticAtom(6);
 
-    pub const static_atom_strings: [&'static str;7] = ["ok", "error", "add", "sub", "mul", "division_by_zero", "div"];
+    pub const static_atom_strings: [AtomInit<'static>;7] = [
+        AtomInit::Lowercase("OK"),
+        AtomInit::Lowercase("ERROR"),
+        AtomInit::Lowercase("ADD"),
+        AtomInit::Lowercase("SUB"),
+        AtomInit::Lowercase("MUL"),
+        AtomInit::Lowercase("DIVISION_BY_ZERO"),
+        AtomInit::Lowercase("DIV"),
+    ];
 }
 
-
+use atom::*;
 
 // fn dynamic_atom(env: &mut Env, _args:&[ScopedTerm]) -> nif::Result<ScopedTerm> {
 //     Ok(Atom::new(env, "an_atom").to_term(env))
@@ -206,18 +214,17 @@ fn catbin<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
 
 
 fn staticatom<'p>(env: &'p Env, _args: &[ScopedTerm]) -> Result<ScopedTerm<'p>> {
-    Ok( atom::ok.bind(env).into() )
+    Ok( OK.bind(env).into() )
 }
 
 fn mathcommand<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
     let t: (StaticAtom, i32, i32) = try!(args.bind(env).try_into());
-
     match t {
-        (atom::add, a, b) => Ok( (atom::ok, a+b).bind(env).into() ),
-        (atom::sub, a, b) => Ok( (atom::ok, a-b).bind(env).into() ),
-        (atom::mul, a, b) => Ok( (atom::ok, a*b).bind(env).into() ),
-        (atom::div, _a,0) => Ok( (atom::error, atom::division_by_zero).bind(env).into() ),
-        (atom::div, a, b) => Ok( (atom::ok, a/b).bind(env).into() ),
+        (ADD, a, b) => Ok( (OK, a+b)                 .bind(env).into() ),
+        (SUB, a, b) => Ok( (OK, a-b)                 .bind(env).into() ),
+        (MUL, a, b) => Ok( (OK, a*b)                 .bind(env).into() ),
+        (DIV, _a,0) => Ok( (ERROR, DIVISION_BY_ZERO) .bind(env).into() ),
+        (DIV, a, b) => Ok( (OK, a/b)                 .bind(env).into() ),
         _ => Err(Error::Badarg)
     }
 }
@@ -233,7 +240,7 @@ fn incresources<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>>
     let (x,y,inc): (&Cell<i32>, Resource<Cell<i32>>, i32) = try!(args.bind(env).try_into());
     x.set(x.get()+inc);
     y.set(y.get()+inc);
-    Ok( atom::ok.bind(env).into() )
+    Ok( OK.bind(env).into() )
 }
 
 fn getresources<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
