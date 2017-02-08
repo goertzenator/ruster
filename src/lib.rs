@@ -110,6 +110,8 @@ Use of `Env` is not threadsafe, hence it lacks the `Sync` trait.
 //#[macro_use]
 pub extern crate erlang_nif_sys;
 
+extern crate unreachable;
+
 use erlang_nif_sys as ens;
 
 // required for macros to work
@@ -145,8 +147,14 @@ mod initmacro;
 pub struct Env(erlang_nif_sys::ErlNifEnv);
 
 impl Env {
-    fn as_api_ptr(&self) -> *mut erlang_nif_sys::ErlNifEnv {
+    // FIXME no pub
+    pub fn as_api_ptr(&self) -> *mut erlang_nif_sys::ErlNifEnv {
         &(self.0) as *const erlang_nif_sys::ErlNifEnv as *mut erlang_nif_sys::ErlNifEnv
+    }
+
+    // FIXME, make not pub
+    pub fn from_api_ptr<'a>(penv: *mut erlang_nif_sys::ErlNifEnv) -> &'a Self {
+        unsafe{ &*(penv as *mut Env) }
     }
 }
 
@@ -157,11 +165,20 @@ pub use erlang_nif_sys::ErlNifPid as Pid;
 pub use erlang_nif_sys::ERL_NIF_TERM as CTerm;
 
 
+// #[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
+// pub struct Term<'a> {
+//     term: CTerm,
+//     _env: std::marker::PhantomData<&'a Env>,
+// }
+
 #[derive(Copy, Clone)]
-pub struct Term<'a> {
-    term: CTerm,
-    _env: std::marker::PhantomData<&'a Env>,
-}
+pub struct ScopedTerm<'a>(CTerm, std::marker::PhantomData<&'a Env>);
+
+#[derive(Copy, Clone)]
+pub struct StaticTerm(CTerm);
+
+
+pub const UNINITIALIZED_STATIC_TERM:StaticTerm = StaticTerm(0);
 
 // struct OwnedEnv {
 //  env: *mut Env,
@@ -177,24 +194,42 @@ use std::result;
 
 
 
-impl<'a> Term<'a> {
-    fn new(ct: CTerm) -> Term<'a> {
-        Term { term: ct, _env: std::marker::PhantomData }
+impl<'a> ScopedTerm<'a> {
+    // FIXME: remove pub
+    pub fn new(ct: CTerm) -> Self {
+        ScopedTerm(ct, std::marker::PhantomData)
     }
-
-    // fn get(&self) -> CTerm {
-    //  self.term
-    // }
 }
 
-// impl From<Term> for CTerm // orphan rule
+// impl From<ScopedTerm> for CTerm // orphan rule
 
-impl<'a> Into<CTerm> for Term<'a> {
+impl<'a> Into<CTerm> for ScopedTerm<'a> {
     fn into(self) -> CTerm {
-        self.term
+        self.0
     }
 }
 
+
+impl StaticTerm {
+    fn new(ct: CTerm) -> Self {
+        StaticTerm(ct)
+    }
+}
+
+impl Into<CTerm> for StaticTerm {
+    fn into(self) -> CTerm {
+        self.0
+    }
+}
+
+
+
+// Convert StaticTerm to ScopedTerm
+impl<'e> From<Binder<'e, StaticTerm>> for ScopedTerm<'e> {
+    fn from(b: Binder<'e, StaticTerm>) -> Self {
+        ScopedTerm::new(b.val.0)
+    }
+}
 
 
 
@@ -202,19 +237,19 @@ impl<'a> Into<CTerm> for Term<'a> {
 ///
 
 
-// pub struct Binder<'a, 'b, T:'a> {
-//     env: &'b Env,
+// pub struct Binder<'a, 'e, T:'a> {
+//     env: &'e Env,
 //     val: &'a T,
 // }
 
 // pub trait Bindable
 //     where Self: Sized {
-//     fn bind<'a, 'b>(&'a self, env: &'b Env) -> Binder<'a, 'b, Self>;
+//     fn bind<'a, 'e>(&'a self, env: &'e Env) -> Binder<'a, 'e, Self>;
 // }
 
 // impl<T> Bindable for T
 // {
-//     fn bind<'a, 'b>(&'a self, env: &'b Env) -> Binder<'a, 'b, Self> {
+//     fn bind<'a, 'e>(&'a self, env: &'e Env) -> Binder<'a, 'e, Self> {
 //         Binder{env: env, val: self}
 //     }
 // }
@@ -222,22 +257,33 @@ impl<'a> Into<CTerm> for Term<'a> {
 
 
 
-pub struct Binder<'b, T> {
-    env: &'b Env,
-    val: T,
+pub struct Binder<'f, T> {
+    pub env: &'f Env,  // FIXME remove pub
+    pub val: T,
 }
 
 pub trait Bind
     where Self: Sized
 {
-    fn bind<'a, 'b>(self, env: &'b Env) -> Binder<'b, Self> {
+    fn bind<'e>(self, env: &'e Env) -> Binder<'e, Self> {
         Binder{env: env, val: self}
     }
 }
 
-impl<'a> Bind for Term<'a> {}
+impl<'a> Bind for ScopedTerm<'a> {}
 
+impl<'e> From<Binder<'e, ScopedTerm<'e>>> for ScopedTerm<'e> {
+    fn from(b: Binder<'e, ScopedTerm<'e>>) -> Self {
+        b.val
+    }
+}
 
+impl<'e> TryFrom<Binder<'e, ScopedTerm<'e>>> for ScopedTerm<'e> {
+    type Err = Error;
+    fn try_from(b: Binder<ScopedTerm<'e>>) -> Result<Self> {
+        Ok(b.val)
+    }
+}
 
 
 
@@ -440,19 +486,7 @@ pub type Result<T> = result::Result<T, Error>;
 
 
 
-////////////
-// Atom
 
-// #[derive(Copy, Clone, Debug)]
-// #[repr(C)]
-// pub struct Atom(CTerm);
-
-// impl Atom {
-//  pub fn new(env: &mut Env, name: &str) -> Atom {
-//      unsafe {
-//          Atom(ens::enif_make_atom_len(env, name.as_ptr(), name.len()))
-//      }
-//  }
 
 //  // pub unsafe fn unchecked_from_term(term: Term) -> Atom {
 //  //  Atom {
@@ -498,15 +532,15 @@ macro_rules! impl_simple_conversion {
 
         impl Bind for $datatype {}
 
-        impl<'b> From<Binder<'b, $datatype>> for Term<'b> {
-            fn from(b: Binder<$datatype>) -> Self {
-                Term::new(  unsafe{$to(std::mem::transmute(b.env), b.val)}  )
+        impl<'e> From<Binder<'e, $datatype>> for ScopedTerm<'e> {
+            fn from(b: Binder<$datatype>) -> Self {  // 'e elided on input and output
+                ScopedTerm::new(  unsafe{$to(std::mem::transmute(b.env), b.val)}  )
             }
         }
 
-        impl<'a, 'b> TryFrom<Binder<'b, Term<'a>>> for $datatype {
+        impl<'a, 'e> TryFrom<Binder<'e, ScopedTerm<'a>>> for $datatype {
             type Err = Error;
-            fn try_from(b: Binder<Term>) -> Result<Self> {
+            fn try_from(b: Binder<ScopedTerm>) -> Result<Self> { // 'e elided on input, no output lifetime
                 let mut result = unsafe {std::mem::uninitialized()};
                 match unsafe{$from(std::mem::transmute(b.env), b.val.into(), &mut result)} {
                     0 => Err(Error::Badarg),
@@ -573,26 +607,19 @@ impl_simple_conversion!(u64,           ens::enif_make_uint64, ens::enif_get_uint
 
 
 
-////////////
-// Erlang tuple as tuple
-
 
 mod tuple;
 pub use tuple::*;
 
-
-////////////
-// Resources
-
-// mod resource;
-// pub use resource::*;
-
-
-////////////
-// Binaries
-
 mod binary;
 pub use binary::*;
+
+mod atom;
+pub use atom::*;
+
+mod resource;
+pub use resource::*;
+
 
 
 

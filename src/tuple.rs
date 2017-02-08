@@ -4,11 +4,16 @@ use super::*;
 
 // convert &[Term] to Term
 
-impl<'a> Bind for &'a [Term<'a>] {}
+impl<'a, T> Bind for &'a [T]
+    where T: Into<CTerm>
+{}
 
-impl<'a, 'b> From<Binder<'b, &'a [Term<'a>]>> for Term<'b> {
-    fn from(b: Binder<'b, &'a [Term<'a>]>) -> Self {
-        Term::new(
+// conert &[Term] to Term
+impl<'a, 'e, T> From<Binder<'e, &'a [T]>> for ScopedTerm<'e>
+    where T: Into<CTerm>
+{
+    fn from(b: Binder<&'a [T]>) -> Self {  // 'e elided on input and output
+        ScopedTerm::new(
             unsafe {
                 ens::enif_make_tuple_from_array(
                     std::mem::transmute(b.env),
@@ -21,66 +26,95 @@ impl<'a, 'b> From<Binder<'b, &'a [Term<'a>]>> for Term<'b> {
 
 
 // convert Term to &[Term]
-impl<'a, 'b> TryFrom<Binder<'b, Term<'a>>> for &'b [Term<'b>] {
+impl<'a, 'e> TryFrom<Binder<'e, ScopedTerm<'a>>> for &'e [ScopedTerm<'e>] {
     type Err = Error;
-    fn try_from(b: Binder<Term>) -> Result<Self> {
+    fn try_from(b: Binder<'e,ScopedTerm<'a>>) -> Result<&'e [ScopedTerm<'e>]> { // elision unclear in this case, specify everything
         unsafe {
             let mut ptr: *const ens::ERL_NIF_TERM = std::mem::uninitialized();
             let mut arity: ens::c_int = std::mem::uninitialized();
             let env = b.env;
             let term = b.val;
-            match ens::enif_get_tuple(std::mem::transmute(env), term.into(), &mut arity, &mut ptr) {
+            match ens::enif_get_tuple(env.as_api_ptr(), term.into(), &mut arity, &mut ptr) {
                 0 => Err(Error::Badarg),
-                _ => Ok( std::slice::from_raw_parts( std::mem::transmute(ptr), arity as usize) ),
+                _ => Ok( std::slice::from_raw_parts( ptr as *const ScopedTerm, arity as usize) ),
             }
         }
     }
 }
 
 
+// pub trait TestTrait3<T> {
+//     fn testfrom3(t: T) -> Self;
+// }
+
+// impl<'e, T0> TestTrait3<Binder<'e, (T0,)>> for ScopedTerm<'e>
+//     where Binder<'e, T0>: Into<ScopedTerm<'e>>,
+//           T0: Bind
+// {
+//     fn testfrom3(b: Binder<'e, (T0,)>) -> ScopedTerm<'e> {
+//         let tup = b.val;
+//         let env = b.env;
+//         let terms: [Term; 1] = [tup.0.bind(env).into()];  // StaticAtom -> Term<'static>
+//         Term::new(
+//             unsafe {
+//                 ens::enif_make_tuple_from_array(
+//                     env.as_api_ptr(),
+//                     terms.as_ptr() as *const ens::ERL_NIF_TERM,
+//                     terms.len() as ens::c_uint)
+//             }
+//         )
+//         // terms.as_ref().bind(env).into()
+//     }
+// }
+
+
+
 macro_rules! impl_tuple_conversion {
     ($arity:expr, [$($indices:tt),*], [$($typevars:ident),*])  => (
 
 
-        impl<'a, $($typevars),*> Bind for &'a ($($typevars),*,) {}
-        impl<$($typevars),*> Bind for ($($typevars),*,) {}
-
-        // convert tuple to [Term;N]
-        impl<'a, 'b, $($typevars),*> From<Binder<'b, ($($typevars),*,)>> for [Term<'b>;$arity]
+        //impl<'a, $($typevars),*> Bind for &'a ($($typevars),*,) {}
+        impl<$($typevars),*> Bind for ($($typevars),*,)
             where
-            $(Binder<'b, $typevars> : Into<Term<'b>>),*,
+            $($typevars : Bind),*
+         {}
+
+        // convert tuple to [ScopedTerm;N]
+        impl<'a, 'e, $($typevars),*> From<Binder<'e, ($($typevars),*,)>> for [ScopedTerm<'e>;$arity]
+            where
+            $(Binder<'e, $typevars> : Into<ScopedTerm<'e>>),*,
             $($typevars : Bind),*
 
         {
-            fn from(b: Binder<'b, ($($typevars),*,)>) -> Self {
+            fn from(b: Binder<'e, ($($typevars),*,)>) -> [ScopedTerm<'e>;$arity] {
                 let tup = b.val;
                 let env = b.env;
                 [$(tup.$indices.bind(env).into()),*]
             }
         }
 
-        // convert tuple to [Term;N] to Term
-        impl<'a, 'b, $($typevars),*> From<Binder<'b, ($($typevars),*,)>> for Term<'b>
+        // convert tuple to [ScopedTerm;N] to ScopedTerm
+        impl<'e, $($typevars),*> From<Binder<'e, ($($typevars),*,)>> for ScopedTerm<'e>
             where
-            $(Binder<'b, $typevars> : Into<Term<'b>>),*,
+            $(Binder<'e, $typevars> : Into<ScopedTerm<'e>>),*,
             $($typevars : Bind),*
         {
-            fn from(b: Binder<'b, ($($typevars),*,)>) -> Self {
+            fn from(b: Binder<'e, ($($typevars),*,)>) -> ScopedTerm<'e> {
                 let tup = b.val;
                 let env = b.env;
-//              let terms:[Term; $arity] = [$(tup.$indices.bind(env).into()),*];
-                let terms:[Term; $arity] = tup.bind(env).into();
+                let terms:[ScopedTerm; $arity] = [$(tup.$indices.bind(env).into()),*];
+//                let terms:[Term; $arity] = tup.bind(env).into();
                 terms.as_ref().bind(env).into()
             }
         }
 
-        // convert &[Term] to tuple
-        impl<'a, 'b, $($typevars),*> TryFrom<Binder<'b, &'a [Term<'a>]>> for ($($typevars),*,)
+        // convert &[ScopedTerm] to tuple
+        impl<'a, 'e, $($typevars),*> TryFrom<Binder<'e, &'a [ScopedTerm<'a>]>> for ($($typevars),*,)
             where
-            $($typevars: TryFrom<Binder<'b, Term<'a>>, Err = Error>),*
+            $($typevars: TryFrom<Binder<'e, ScopedTerm<'a>>, Err = Error>),*
         {
             type Err = Error;
-            fn try_from(b: Binder<'b, &'a [Term<'a>]>) -> Result<Self>
+            fn try_from(b: Binder<'e, &'a [ScopedTerm<'a>]>) -> Result<Self>
             {
                 let terms = b.val;
                 let env = b.env;
@@ -91,19 +125,19 @@ macro_rules! impl_tuple_conversion {
             }
         }
 
-        // convert Term to &[Term] to tuple
-        impl<'a, 'b, $($typevars),*> TryFrom<Binder<'b, Term<'a>>> for ($($typevars),*,)
+        // convert ScopedTerm to &[ScopedTerm] to tuple
+        impl<'a, 'e, $($typevars),*> TryFrom<Binder<'e, ScopedTerm<'a>>> for ($($typevars),*,)
             where
-            $($typevars: TryFrom<Binder<'b, Term<'a>>, Err = Error>),*
+            $($typevars: TryFrom<Binder<'e, ScopedTerm<'a>>, Err = Error>),*
         {
             type Err = Error;
-            fn try_from(b: Binder<'b, Term<'a>>) -> Result<Self> {
+            fn try_from(b: Binder<'e, ScopedTerm<'a>>) -> Result<Self> {
                 let term = b.val;
                 let env = b.env;
 
-                //let terms:&[Term] = try!(term.bind(env).try_into());
+                //let terms:&[ScopedTerm] = try!(term.bind(env).try_into());
                 // manual expansion to avoid lifetime conflicts that I don't understand
-                let terms:&[Term] = try!(unsafe {
+                let terms:&[ScopedTerm] = try!(unsafe {
                     let mut ptr: *const ens::ERL_NIF_TERM = std::mem::uninitialized();
                     let mut arity: ens::c_int = std::mem::uninitialized();
                     match ens::enif_get_tuple(std::mem::transmute(env), term.into(), &mut arity, &mut ptr) {
@@ -132,26 +166,26 @@ macro_rules! impl_tuple_conversion {
 
 impl Bind for () {}
 
-impl<'b> From<Binder<'b, ()>> for [Term<'b>; 0]
+impl<'e> From<Binder<'e, ()>> for [ScopedTerm<'e>; 0]
 {
-    fn from(_b: Binder<'b, ()>) -> Self {
+    fn from(_b: Binder<'e, ()>) -> Self {
         []
     }
 }
 
-impl<'b> From<Binder<'b, ()>> for Term<'b>
+impl<'e> From<Binder<'e, ()>> for ScopedTerm<'e>
 {
-    fn from(b: Binder<'b, ()>) -> Self {
+    fn from(b: Binder<'e, ()>) -> Self {
         let env = b.env;
-        let terms: [Term; 0] = [];
+        let terms: [ScopedTerm; 0] = [];
         terms.as_ref().bind(env).into()
     }
 }
 
-impl<'a, 'b> TryFrom<Binder<'b, &'a [Term<'a>]>> for ()
+impl<'a, 'e> TryFrom<Binder<'e, &'a [ScopedTerm<'a>]>> for ()
 {
     type Err = Error;
-    fn try_from(b: Binder<'b, &'a [Term<'a>]>) -> Result<Self> {
+    fn try_from(b: Binder<'e, &'a [ScopedTerm<'a>]>) -> Result<Self> {
         let terms = b.val;
         if terms.len() != 0 {
             return Err(Error::Badarg);
@@ -160,13 +194,13 @@ impl<'a, 'b> TryFrom<Binder<'b, &'a [Term<'a>]>> for ()
     }
 }
 
-impl<'a, 'b> TryFrom<Binder<'b, Term<'a>>> for ()
+impl<'a, 'e> TryFrom<Binder<'e, ScopedTerm<'a>>> for ()
 {
     type Err = Error;
-    fn try_from(b: Binder<'b, Term<'a>>) -> Result<Self> {
+    fn try_from(b: Binder<'e, ScopedTerm<'a>>) -> Result<Self> {
         let term = b.val;
         let env = b.env;
-        let terms: &[Term] = try!(unsafe {
+        let terms: &[ScopedTerm] = try!(unsafe {
             let mut ptr: *const ens::ERL_NIF_TERM = std::mem::uninitialized();
             let mut arity: ens::c_int = std::mem::uninitialized();
             match ens::enif_get_tuple(std::mem::transmute(env),

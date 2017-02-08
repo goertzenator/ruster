@@ -5,9 +5,9 @@ use std::slice::{from_raw_parts, from_raw_parts_mut};
 
 
 
-impl<'a,'b> TryFrom<Binder<'b, Term<'a>>> for &'a [u8] {
+impl<'a,'b> TryFrom<Binder<'b, ScopedTerm<'a>>> for &'a [u8] {
     type Err=Error;
-    fn try_from(b: Binder<'b, Term<'a>>) -> Result<Self> {
+    fn try_from(b: Binder<'b, ScopedTerm<'a>>) -> Result<Self> {
         unsafe {
             let mut binary = uninitialized();
             match ens::enif_inspect_binary(b.env.as_api_ptr(), b.val.into(), &mut binary) {
@@ -15,7 +15,6 @@ impl<'a,'b> TryFrom<Binder<'b, Term<'a>>> for &'a [u8] {
                 _ => Ok(from_raw_parts(binary.data, binary.size))
             }
         }
-
     }
 }
 
@@ -60,10 +59,10 @@ impl Drop for Binary {
 
 impl Bind for Binary {}
 
-impl<'b> From<Binder<'b, Binary>> for Term<'b> {
+impl<'b> From<Binder<'b, Binary>> for ScopedTerm<'b> {
     fn from(b: Binder<'b, Binary>) -> Self {
         unsafe {
-            Term::new(ens::enif_make_binary(b.env.as_api_ptr(), b.val.as_api_ptr()))
+            ScopedTerm::new(ens::enif_make_binary(b.env.as_api_ptr(), b.val.as_api_ptr()))
         }
         // The Binary gets Dropped.
     }

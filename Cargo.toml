@@ -17,6 +17,7 @@ appveyor  = { repository = "https://github.com/goertzenator/ruster" }
 [dependencies]
 #erlang_nif-sys = "0.6"
 erlang_nif-sys = { path = "/home/goertzen/erlang_nif-sys" }
+unreachable = "0.1.1"
 
 [dev-dependencies]
 walkdir = "1.0"
