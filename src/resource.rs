@@ -9,14 +9,19 @@ use std::any::{Any, TypeId};
 
 
 //
-// "Any" trait object (ATO) Resource
+// "Any" Trait Object (ATO) Resource
 //
-// The ATO Resource is a resource type that allows any Rust type to be used with a single
+// The ATO Resource is a generic resource type that allows any Rust type to be used with a single
 // enif_open_resource_type() registration.  The "Any" trait object is emulated with
 // a pseudo-VMT (pseudo because it is a function and not a table)
 
 static mut ATO_RESOURCE: *const ens::ErlNifResourceType = 0 as *const ens::ErlNifResourceType;
 
+
+struct ATOWrapper<T:'static>{
+    vmtf: fn(VMTParams),
+    data: T,
+}
 
 enum VMTParams {
     Typeid(*mut TypeId),
@@ -29,11 +34,6 @@ fn vmt_function<T:'static>(params: VMTParams)
         VMTParams::Typeid(id)      => unsafe { *id = TypeId::of::<T>() },
         VMTParams::Dtor(_env, obj) => unsafe { ptr::drop_in_place(obj as *mut ATOWrapper<T>) },
     }
-}
-
-struct ATOWrapper<T:'static>{
-    vmtf: fn(VMTParams),
-    data: T,
 }
 
 impl<T:'static> ATOWrapper<T> {
@@ -68,6 +68,8 @@ pub fn init_ato(env: *mut ens::ErlNifEnv) {
     }
 }
 
+// when enif_select() lands...
+// pub trait ErlangSelect {}
 
 
 

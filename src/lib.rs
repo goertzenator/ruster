@@ -141,6 +141,9 @@ Env and Term constraints
 #[macro_use]
 mod initmacro;
 
+#[macro_use]
+mod rustermacro;
+
 //pub use erlang_nif_sys::ErlNifEnv as Env;
 
 #[repr(C)]
@@ -620,6 +623,8 @@ pub use atom::*;
 mod resource;
 pub use resource::*;
 
+mod privdata;
+pub use privdata::*;
 
 
 

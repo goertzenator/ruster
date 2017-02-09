@@ -1,4 +1,4 @@
-
+//#![feature(trace_macros)]
 
 // #[macro_use]
 // extern crate erlang_nif_sys;
@@ -8,7 +8,8 @@
 extern crate ruster;
 
 use ruster::{Env, ScopedTerm, StaticTerm, Binary, Resource,
-    StaticAtom, Binder, Error, Bind, TryInto, Result};
+    StaticAtom, Binder, Error, Bind, TryInto, Result,
+    PrivData};
 
 // use nif::{open_resource_type, new_binary, ResourcePtr, Error};
 // use nif::{selfpid, send_from_process};
@@ -16,10 +17,9 @@ use ruster::{Env, ScopedTerm, StaticTerm, Binary, Resource,
 
 use std::cell::Cell;
 
+//trace_macros!(true);
 /// Create NIF module data and init function.
-nif_init!("mynifmod", [
-        // ("dynamic_atom",    0, ruster_fn!(dynamic_atom_wrapper)),
-        // ("prebuilt_atom",   0, ruster_fn!(prebuilt_atom_wrapper)),
+ruster_init!("mynifmod", [
         ("int",             0, ruster_fn!(int)),
         ("add_ints1",       2, ruster_fn!(add_ints1)),
         ("tuple1",          1, ruster_fn!(tuple1)),
@@ -31,127 +31,23 @@ nif_init!("mynifmod", [
         ("makeresources",   2, ruster_fn!(makeresources)),
         ("incresources",    3, ruster_fn!(incresources)),
         ("getresources",    2, ruster_fn!(getresources)),
-
-        // ("doubleit",        1, ruster_fn!(doubleit_wrapper)),
-        // ("selfsend",        0, ruster_fn!(selfsend_wrapper)),
-        // ("decode_int",      1, ruster_fn!(decode_int_wrapper)),
-        // ("tuple_math",      1, ruster_fn!(tuple_math_wrapper)),
-        // ("param2tuple",     2, ruster_fn!(param2tuple_wrapper)),
-        // ("make_resource",   1, ruster_fn!(make_resource_wrapper)),
-        // ("render_resource", 2, ruster_fn!(render_resource_wrapper)),
-        // ("mutate_resource", 3, ruster_fn!(mutate_resource_wrapper)),
-        // ("reverse_binary",  1, ruster_fn!(reverse_binary_wrapper)),
     ],
-    {load: ruster_module_load, unload: ruster_module_unload}
+    [OK, ERROR, ADD, SUB, MUL, DIVISION_BY_ZERO, DIV],
+    MyType
 );
 
 
-
-/////////////////////////////////
-// NIF Private Data
-
-
-trait PrivData: Sized + Default {
-    fn load<'a>(env: &'a Env, load_info: ScopedTerm<'a>) -> Self {
-        Default::default()
+struct MyType;
+impl PrivData for MyType {
+    fn load<'e>(_env: &'e Env, _load_info: ScopedTerm<'e>) -> Self {
+        MyType
     }
-
-    //fn upgrade<T>(env: &Env, olddata: T, load_info: ScopedTerm<'a>) -> Self {
-    //  olddata.into()
-    // }
-    fn unload(self, env: &Env) {}
-
-}
-
-// No good without trait specialization
-// impl<T> PrivData for T
-//     where T: Default
-//     {}
-
-
-#[derive(Default)]
-struct MyType {}
-impl PrivData for MyType {}
-use ruster::erlang_nif_sys as ens;
-
-// synthesized in user program with non-generic type
-
-fn ruster_module_load(penv: *mut ens::ErlNifEnv,
-        priv_data: *mut *mut ens::c_void,
-        load_info: ens::ERL_NIF_TERM)-> ens::c_int {
-    let env = Env::from_api_ptr(penv);
-    let data: Box<MyType> = Box::new( PrivData::load(env, ScopedTerm::new(load_info) ));
-    unsafe{ *priv_data = Box::into_raw(data) as *mut ens::c_void; }
-    ruster::init_static_atom_data(env, &atom::static_atom_strings);
-    ruster::init_ato(penv);
-    0
-}
-
-
-// fn ruster_module_upgrade(env: *mut ens::ErlNifEnv,
-//            priv_data: *mut *mut ens::c_void,
-//            old_priv_data: *mut *mut ens::c_void,
-//                       load_info: ens::ERL_NIF_TERM) -> ens::c_int {
-//  let olddata: Box<T> = Box::from_raw(old_priv_data as *mut T);
-//  let data: Box<MyType> = Box::new( NIFLoad::upgrade(Env::from_api_ptr(penv), *T, ScopedTerm::new(load_info)) );
-//     unsafe{
-//      *priv_data = Box::into_raw(data) as *mut ens::c_void;
-//      *old_priv_data = std::ptr::null_mut(); // NIFLoad::upgrade consumes oldata
-//     }
-// }
-
-fn ruster_module_unload(penv: *mut ens::ErlNifEnv,
-          priv_data: *mut ens::c_void) {
-
-    let data: Box<MyType> = unsafe{ Box::from_raw(priv_data as *mut MyType) };
-    data.unload(Env::from_api_ptr(penv));
-    ruster::destroy_static_atom_data();
-}
-
-
-// synthesized in user program with non-generic type
-fn priv_data(env: &Env) -> &'static MyType {
-    unsafe {
-        &*(ens::enif_priv_data(env.as_api_ptr()) as *mut MyType)
-    }
-}
-
-#[allow(non_upper_case_globals)]
-pub mod atom {
-    use std;
-    use ruster::*;
-    pub const OK: StaticAtom = StaticAtom(0);
-    pub const ERROR: StaticAtom = StaticAtom(1);
-    pub const ADD: StaticAtom = StaticAtom(2);
-    pub const SUB: StaticAtom = StaticAtom(3);
-    pub const MUL: StaticAtom = StaticAtom(4);
-    pub const DIVISION_BY_ZERO: StaticAtom = StaticAtom(5);
-    pub const DIV: StaticAtom = StaticAtom(6);
-
-    pub const static_atom_strings: [AtomInit<'static>;7] = [
-        AtomInit::Lowercase("OK"),
-        AtomInit::Lowercase("ERROR"),
-        AtomInit::Lowercase("ADD"),
-        AtomInit::Lowercase("SUB"),
-        AtomInit::Lowercase("MUL"),
-        AtomInit::Lowercase("DIVISION_BY_ZERO"),
-        AtomInit::Lowercase("DIV"),
-    ];
 }
 
 use atom::*;
 
-// fn dynamic_atom(env: &mut Env, _args:&[ScopedTerm]) -> nif::Result<ScopedTerm> {
-//     Ok(Atom::new(env, "an_atom").to_term(env))
-// }
 
-// fn prebuilt_atom(env: &mut Env, _args:&[ScopedTerm]) -> nif::Result<ScopedTerm> {
-//     Ok(get_priv_data(env).prebuilt_atom.to_term(env))
-// }
-
-
-
-// fn term_scope<'a>(env: &'a Env, args: &[ScopedTerm]) -> nif::Result<ScopedTerm<'a>> {
+// fn term_scope<'e>(env: &'e Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'e>> {
 //     // ScopedTerm scope test.  Try to store term in static data.  Must not compile.
 //     static mut STATIC_TERM : Option<ScopedTerm<'static>> = None;
 //     unsafe { STATIC_TERM = Some(args[0]); }
@@ -159,42 +55,38 @@ use atom::*;
 // }
 
 
-
-
-
-
 fn int<'a>(env: &'a Env, _args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
     Ok(12345.bind(env).into())
 }
 
 fn add_ints1<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let a:i32 = try!(args[0].bind(env).try_into());
-    let b:i32 = try!(args[1].bind(env).try_into());
+    let a:i32 = args[0].bind(env).try_into()?;
+    let b:i32 = args[1].bind(env).try_into()?;
     Ok((a+b).bind(env).into())
 }
 
 
 fn tuple1<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
     //Ok(12345.bind(env).into())
-    let (a, b, c, d) : (i32, u32, i64, u64) = try!(args[0].bind(env).try_into());
+    let (a, b, c, d) : (i32, u32, i64, u64) = args[0].bind(env).try_into()?;
     Ok( (d, a, b, c).bind(env).into() )
 }
 
 fn tuple2<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
     // Ok(12345.bind(env).into())
-    let (a, b, c, d) : (i32, u32, i64, u64) = try!(args.bind(env).try_into());
+    let (a, b, c, d) : (i32, u32, i64, u64) = args.bind(env).try_into()?;
     Ok( (b, c, d, a).bind(env).into() )
 }
 
 fn tuple0<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
     // Ok(12345.bind(env).into())
-    let (x,y) : ((),()) = try!(args.bind(env).try_into());
+    let (x,y) : ((),()) = args.bind(env).try_into()?;
     Ok( (x,y,()).bind(env).into() )
 }
 
 fn catbin<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
     // unpack args
-    let (a,b): (&[u8], &[u8]) = try!(args.bind(env).try_into());
+    let (a,b): (&[u8], &[u8]) = args.bind(env).try_into()?;
 
     // allocate binary
     let mut bin = Binary::new(a.len() + b.len());
@@ -218,7 +110,7 @@ fn staticatom<'p>(env: &'p Env, _args: &[ScopedTerm]) -> Result<ScopedTerm<'p>> 
 }
 
 fn mathcommand<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let t: (StaticAtom, i32, i32) = try!(args.bind(env).try_into());
+    let t: (StaticAtom, i32, i32) = args.bind(env).try_into()?;
     match t {
         (ADD, a, b) => Ok( (OK, a+b)                 .bind(env).into() ),
         (SUB, a, b) => Ok( (OK, a-b)                 .bind(env).into() ),
@@ -230,26 +122,26 @@ fn mathcommand<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> 
 }
 
 fn makeresources<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let (a,b): (i32, i32) = try!(args.bind(env).try_into());
+    let (a,b): (i32, i32) = args.bind(env).try_into()?;
     let x = Resource::new(Cell::new(a));
     let y = Resource::new(Cell::new(b));
     Ok( (&x,y).bind(env).into())
 }
 
 fn incresources<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let (x,y,inc): (&Cell<i32>, Resource<Cell<i32>>, i32) = try!(args.bind(env).try_into());
+    let (x,y,inc): (&Cell<i32>, Resource<Cell<i32>>, i32) = args.bind(env).try_into()?;
     x.set(x.get()+inc);
     y.set(y.get()+inc);
     Ok( OK.bind(env).into() )
 }
 
 fn getresources<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let (x,y): (&Cell<i32>, Resource<Cell<i32>>) = try!(args.bind(env).try_into());
+    let (x,y): (&Cell<i32>, Resource<Cell<i32>>) = args.bind(env).try_into()?;
     Ok( (x.get(), y.get()).bind(env).into())
 }
 
 // fn doubleit(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-//     let (f,):(f64,) = try!(args.from_term(env));
+//     let (f,):(f64,) = args.from_term(env));
 //     Ok((f*2.0).to_term(env))
 // }
 
@@ -264,26 +156,26 @@ fn getresources<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>>
 
 
 // fn decode_int(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-//     //let num:i32 = try!(FromTerm::from_term(env, args[0]));
-//     let num:i32 = try!(args[0].from_term(env));
+//     //let num:i32 = FromTerm::from_term(env, args[0]));
+//     let num:i32 = args[0].from_term(env));
 //     Ok( (num * 2).to_term(env) )
 // }
 
 
 
 // fn tuple_math(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-//     let (a,b):(i32, i32) = try!(args[0].from_term(env));
+//     let (a,b):(i32, i32) = args[0].from_term(env));
 //     Ok( (a+10, b*2).to_term(env) )
 // }
 
 // fn param2tuple(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-//     let (a,b):(i32, i32) = try!(args.from_term(env));
+//     let (a,b):(i32, i32) = args.from_term(env));
 //     Ok( (a+10, b*2).to_term(env) )
 // }
 
 
 // fn make_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-//     let (resnum,):(i32,) = try!(args.from_term(env));
+//     let (resnum,):(i32,) = args.from_term(env));
 //     match resnum {
 //         0 => Ok(ResourcePtr::new(1239).to_term(env)),
 //         1 => {
@@ -296,10 +188,10 @@ fn getresources<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>>
 // }
 
 // fn render_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-//     let (resnum, resterm):(i32, Term) = try!(args.from_term(env));
+//     let (resnum, resterm):(i32, Term) = args.from_term(env));
 //     match resnum {
 //         0 => {
-//             let p: ResourcePtr<i32> = try!(resterm.from_term(env));
+//             let p: ResourcePtr<i32> = resterm.from_term(env));
 //             Ok((*p).to_term(env))
 //         },
 //         _ => Err(Error::Badarg),
@@ -307,15 +199,15 @@ fn getresources<'a>(env: &'a Env, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>>
 // }
 
 // fn mutate_resource(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-//     let (resnum, resterm, valterm):(i32, Term, Term) = try!(args.from_term(env));
+//     let (resnum, resterm, valterm):(i32, Term, Term) = args.from_term(env));
 //     Err(Error::Badarg)
 // }
 
 
 // fn reverse_binary(env: &mut Env, args: &[Term]) -> nif::Result<Term> {
-//     let (binterm,):(Term,) = try!(args.from_term(env));
+//     let (binterm,):(Term,) = args.from_term(env));
 
-//     let oldslice: &[u8] = try!(binterm.from_term(env));
+//     let oldslice: &[u8] = binterm.from_term(env));
 //     let (newterm, newslice) = new_binary(env, oldslice.len());
 
 //     let mut newiter = newslice.iter_mut();
