@@ -146,17 +146,18 @@ mod rustermacro;
 
 //pub use erlang_nif_sys::ErlNifEnv as Env;
 
-#[repr(C)]
+// pub trait Env {
+
+// }
+
 pub struct Env(erlang_nif_sys::ErlNifEnv);
 
 impl Env {
-    // FIXME no pub
-    pub fn as_api_ptr(&self) -> *mut erlang_nif_sys::ErlNifEnv {
+    fn as_api_ptr(&self) -> *mut erlang_nif_sys::ErlNifEnv {
         &(self.0) as *const erlang_nif_sys::ErlNifEnv as *mut erlang_nif_sys::ErlNifEnv
     }
 
-    // FIXME, make not pub
-    pub fn from_api_ptr<'a>(penv: *mut erlang_nif_sys::ErlNifEnv) -> &'a Self {
+    fn from_api_ptr<'a>(penv: *mut erlang_nif_sys::ErlNifEnv) -> &'a Self {
         unsafe{ &*(penv as *mut Env) }
     }
 }
@@ -198,8 +199,7 @@ use std::result;
 
 
 impl<'a> ScopedTerm<'a> {
-    // FIXME: remove pub
-    pub fn new(ct: CTerm) -> Self {
+    fn new(ct: CTerm) -> Self {
         ScopedTerm(ct, std::marker::PhantomData)
     }
 }
@@ -261,8 +261,8 @@ impl<'e> From<Binder<'e, StaticTerm>> for ScopedTerm<'e> {
 
 
 pub struct Binder<'f, T> {
-    pub env: &'f Env,  // FIXME remove pub
-    pub val: T,
+    env: &'f Env,
+    val: T,
 }
 
 pub trait Bind

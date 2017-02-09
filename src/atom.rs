@@ -71,8 +71,8 @@ impl Bind for StaticAtom {}
 
 static mut STATIC_ATOM_DATA: *mut StaticAtomData = 0 as *mut StaticAtomData;
 
-pub fn init_static_atom_data(env: &Env, atom_names: &[AtomInit]) {
-	let r = Box::new( StaticAtomData::new(env, atom_names) );
+pub fn init_static_atom_data(penv: *mut ens::ErlNifEnv, atom_names: &[AtomInit]) {
+	let r = Box::new( StaticAtomData::new(Env::from_api_ptr(penv), atom_names) );
 	unsafe {
 		STATIC_ATOM_DATA = Box::into_raw(r);
 	}

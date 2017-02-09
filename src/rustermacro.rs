@@ -17,7 +17,7 @@ macro_rules! ruster_init {
         fn load(penv: *mut $crate::erlang_nif_sys::ErlNifEnv,
                 priv_data: *mut *mut $crate::erlang_nif_sys::c_void,
                 load_info: $crate::erlang_nif_sys::ERL_NIF_TERM) -> $crate::erlang_nif_sys::c_int {
-            $crate::init_static_atom_data($crate::Env::from_api_ptr(penv), atom::STATIC_ATOM_STRINGS);
+            $crate::init_static_atom_data(penv, atom::STATIC_ATOM_STRINGS);
             $crate::load::<MyType>(penv, priv_data, load_info)
         }
 
