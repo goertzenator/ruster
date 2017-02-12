@@ -32,7 +32,7 @@ fn do_test() {
     // copy_all(&appdir_src, &out_dir).unwrap();
 
     // get working dir for Erlang test application
-//    let mut appdir = PathBuf::new();
+    //    let mut appdir = PathBuf::new();
     let mut appdir = env::current_dir().unwrap();
     //appdir.push(&out_dir);
     appdir.push("tests");
@@ -41,12 +41,17 @@ fn do_test() {
 
     // build test crate
     println!("appdir = {:?}", appdir);
-    invoke_erlangapp(&["cargo-erlangapp", "build" ], &appdir);
+    invoke_erlangapp(&["cargo-erlangapp", "build"], &appdir);
 
     let escript = env::var("ESCRIPT").unwrap_or("escript".to_string());
 
     // compile and run erlang eunit tests
-    match Command::new(escript).current_dir(&appdir).arg("dotest.escript").status().expect("failed to execute escript").success() {
+    match Command::new(escript)
+        .current_dir(&appdir)
+        .arg("dotest.escript")
+        .status()
+        .expect("failed to execute escript")
+        .success() {
         true => (),
         false => panic!("erlang tests failed"),
     };

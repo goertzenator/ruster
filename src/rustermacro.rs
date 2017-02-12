@@ -21,7 +21,8 @@ macro_rules! ruster_init {
             $crate::load::<MyType>(penv, priv_data, load_info)
         }
 
-        fn priv_data(env: &Env) -> &'static $privtype {
+        #[allow(dead_code)]
+        fn priv_data(env: & $crate::ProcEnv) -> &'static $privtype {
             $crate::internal_priv_data::<$privtype>(env)
         }
 
@@ -60,7 +61,6 @@ macro_rules! impl_atoms_mod {
     ( [$($atoms:tt),*] ) => (
 
         pub mod atom {
-            use std;
             use $crate::*;
 
             decl_static_atoms!(0, [$($atoms),*]);

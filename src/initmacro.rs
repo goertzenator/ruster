@@ -261,18 +261,28 @@ mod initmacro_namespace_tests {
     use std::ffi::{CString, CStr};
 
     // Initializer tests
-    fn load(_env: *mut erlang_nif_sys_api::ErlNifEnv, _priv_data: *mut *mut erlang_nif_sys_api::c_void, _load_info: erlang_nif_sys_api::ERL_NIF_TERM) -> erlang_nif_sys_api::c_int {
+    fn load(_env: *mut erlang_nif_sys_api::ErlNifEnv,
+            _priv_data: *mut *mut erlang_nif_sys_api::c_void,
+            _load_info: erlang_nif_sys_api::ERL_NIF_TERM)
+            -> erlang_nif_sys_api::c_int {
         14
     }
 
-    fn unload(_env: *mut erlang_nif_sys_api::ErlNifEnv, _priv_data: *mut erlang_nif_sys_api::c_void) {}
-
-
-    fn raw_nif1(_env: *mut erlang_nif_sys_api::ErlNifEnv, argc: erlang_nif_sys_api::c_int, _args: *const erlang_nif_sys_api::ERL_NIF_TERM) -> erlang_nif_sys_api::ERL_NIF_TERM {
-        (argc*7) as usize
+    fn unload(_env: *mut erlang_nif_sys_api::ErlNifEnv,
+              _priv_data: *mut erlang_nif_sys_api::c_void) {
     }
 
-    fn slice_nif(_env: *mut erlang_nif_sys_api::ErlNifEnv, args: &[erlang_nif_sys_api::ERL_NIF_TERM]) -> erlang_nif_sys_api::ERL_NIF_TERM {
+
+    fn raw_nif1(_env: *mut erlang_nif_sys_api::ErlNifEnv,
+                argc: erlang_nif_sys_api::c_int,
+                _args: *const erlang_nif_sys_api::ERL_NIF_TERM)
+                -> erlang_nif_sys_api::ERL_NIF_TERM {
+        (argc * 7) as usize
+    }
+
+    fn slice_nif(_env: *mut erlang_nif_sys_api::ErlNifEnv,
+                 args: &[erlang_nif_sys_api::ERL_NIF_TERM])
+                 -> erlang_nif_sys_api::ERL_NIF_TERM {
         args.len() * 17
     }
 
@@ -283,13 +293,13 @@ mod initmacro_namespace_tests {
         assert_eq!(14, unsafe{entry.load.unwrap()(ptr::null_mut(), ptr::null_mut(), 0)});
         assert_eq!(None, entry.reload);
         assert_eq!(None, entry.upgrade);
-        unsafe{entry.unload.unwrap()(ptr::null_mut(), ptr::null_mut())}; // shouldn't panic or crash
+        unsafe { entry.unload.unwrap()(ptr::null_mut(), ptr::null_mut()) }; // shouldn't panic or crash
     }
 
     #[test]
     fn nif1() {
         let entry = get_entry!("nifs", [("raw1", 3, raw_nif1)])();
-        let funcs = unsafe{slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize)};
+        let funcs = unsafe { slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize) };
         assert_eq!(1, funcs.len());
         assert_eq!(CString::new("raw1").unwrap().as_ref(), unsafe{CStr::from_ptr(funcs[0].name as *const i8)});
         assert_eq!(3,  funcs[0].arity);
@@ -300,7 +310,7 @@ mod initmacro_namespace_tests {
     #[test]
     fn nif_wrapped() {
         let entry = get_entry!("nifs", [("sliced", 6, slice_args!(slice_nif))])();
-        let funcs = unsafe{slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize)};
+        let funcs = unsafe { slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize) };
         assert_eq!(1, funcs.len());
         assert_eq!(CString::new("sliced").unwrap().as_ref(), unsafe{CStr::from_ptr(funcs[0].name as *const i8)});
         assert_eq!(6,  funcs[0].arity);
@@ -328,33 +338,45 @@ mod initmacro_tests {
     fn unload(_env: *mut ErlNifEnv, _priv_data: *mut c_void) {}
 
     fn raw_nif1(_env: *mut ErlNifEnv, argc: c_int, _args: *const ERL_NIF_TERM) -> ERL_NIF_TERM {
-        (argc*7) as usize
+        (argc * 7) as usize
     }
 
     fn raw_nif2(_env: *mut ErlNifEnv, argc: c_int, _args: *const ERL_NIF_TERM) -> ERL_NIF_TERM {
-        (argc*11) as usize
+        (argc * 11) as usize
     }
 
     fn slice_nif(_env: *mut ErlNifEnv, args: &[ERL_NIF_TERM]) -> ERL_NIF_TERM {
         args.len() * 17
     }
 
-    extern "C" fn c_load(_env: *mut ErlNifEnv, _priv_data: *mut *mut c_void, _load_info: ERL_NIF_TERM) -> c_int {
+    extern "C" fn c_load(_env: *mut ErlNifEnv,
+                         _priv_data: *mut *mut c_void,
+                         _load_info: ERL_NIF_TERM)
+                         -> c_int {
         114
     }
 
     extern "C" fn c_unload(_env: *mut ErlNifEnv, _priv_data: *mut c_void) {}
 
-    extern "C" fn c_nif1(_env: *mut ErlNifEnv, argc: c_int, _args: *const ERL_NIF_TERM) -> ERL_NIF_TERM {
-        (argc*19) as usize
+    extern "C" fn c_nif1(_env: *mut ErlNifEnv,
+                         argc: c_int,
+                         _args: *const ERL_NIF_TERM)
+                         -> ERL_NIF_TERM {
+        (argc * 19) as usize
     }
 
-    unsafe fn unsafe_load(_env: *mut ErlNifEnv, _priv_data: *mut *mut c_void, _load_info: ERL_NIF_TERM) -> c_int {
+    unsafe fn unsafe_load(_env: *mut ErlNifEnv,
+                          _priv_data: *mut *mut c_void,
+                          _load_info: ERL_NIF_TERM)
+                          -> c_int {
         15
     }
 
-    unsafe fn unsafe_nif(_env: *mut ErlNifEnv, argc: c_int, _args: *const ERL_NIF_TERM) -> ERL_NIF_TERM {
-        (argc*23) as usize
+    unsafe fn unsafe_nif(_env: *mut ErlNifEnv,
+                         argc: c_int,
+                         _args: *const ERL_NIF_TERM)
+                         -> ERL_NIF_TERM {
+        (argc * 23) as usize
     }
 
 
@@ -385,21 +407,23 @@ mod initmacro_tests {
         assert_eq!(14, unsafe{entry.load.unwrap()(ptr::null_mut(), ptr::null_mut(), 0)});
         assert_eq!(None, entry.reload);
         assert_eq!(None, entry.upgrade);
-        unsafe{entry.unload.unwrap()(ptr::null_mut(), ptr::null_mut())}; // shouldn't panic or crash
+        unsafe { entry.unload.unwrap()(ptr::null_mut(), ptr::null_mut()) }; // shouldn't panic or crash
     }
 
     #[test]
-    fn opt_some2b() {  // optionals in different order as opt_some2
+    fn opt_some2b() {
+        // optionals in different order as opt_some2
         let entry = get_entry!("empty", [], {unload:unload, load: load})();
         assert_eq!(0, entry.num_of_funcs);
         assert_eq!(14, unsafe{entry.load.unwrap()(ptr::null_mut(), ptr::null_mut(), 0)});
         assert_eq!(None, entry.reload);
         assert_eq!(None, entry.upgrade);
-        unsafe{entry.unload.unwrap()(ptr::null_mut(), ptr::null_mut())}; // shouldn't panic or crash
+        unsafe { entry.unload.unwrap()(ptr::null_mut(), ptr::null_mut()) }; // shouldn't panic or crash
     }
 
     #[test]
-    fn opt_closure() {  // optionals in different order as opt_some2
+    fn opt_closure() {
+        // optionals in different order as opt_some2
         let entry = get_entry!("empty", [], {load: |_,_,_|15})();
         assert_eq!(15, unsafe{entry.load.unwrap()(ptr::null_mut(), ptr::null_mut(), 0)});
     }
@@ -414,7 +438,7 @@ mod initmacro_tests {
     #[test]
     fn nif1() {
         let entry = get_entry!("nifs", [("raw1", 3, raw_nif1)])();
-        let funcs = unsafe{slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize)};
+        let funcs = unsafe { slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize) };
         assert_eq!(1, funcs.len());
         assert_eq!(CString::new("raw1").unwrap().as_ref(), unsafe{CStr::from_ptr(funcs[0].name as *const i8)});
         assert_eq!(3,  funcs[0].arity);
@@ -425,7 +449,7 @@ mod initmacro_tests {
     #[test]
     fn nif2() {
         let entry = get_entry!("nifs", [("raw1", 3, raw_nif1),("raw2", 33, raw_nif2, ERL_NIF_DIRTY_JOB_IO_BOUND)])();
-        let funcs = unsafe{slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize)};
+        let funcs = unsafe { slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize) };
         assert_eq!(2, funcs.len());
         assert_eq!(CString::new("raw1").unwrap().as_ref(), unsafe{CStr::from_ptr(funcs[0].name as *const i8)});
         assert_eq!(3,  funcs[0].arity);
@@ -440,7 +464,7 @@ mod initmacro_tests {
     #[test]
     fn nif_closure() {
         let entry = get_entry!("nifs", [("closure", 5, |_,argc,_| (argc*13) as usize )])();
-        let funcs = unsafe{slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize)};
+        let funcs = unsafe { slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize) };
         assert_eq!(1, funcs.len());
         assert_eq!(CString::new("closure").unwrap().as_ref(), unsafe{CStr::from_ptr(funcs[0].name as *const i8)});
         assert_eq!(5,  funcs[0].arity);
@@ -451,7 +475,7 @@ mod initmacro_tests {
     #[test]
     fn nif_wrapped() {
         let entry = get_entry!("nifs", [("sliced", 6, slice_args!(slice_nif))])();
-        let funcs = unsafe{slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize)};
+        let funcs = unsafe { slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize) };
         assert_eq!(1, funcs.len());
         assert_eq!(CString::new("sliced").unwrap().as_ref(), unsafe{CStr::from_ptr(funcs[0].name as *const i8)});
         assert_eq!(6,  funcs[0].arity);
@@ -466,14 +490,14 @@ mod initmacro_tests {
             Some(c_load), None, None, Some(c_unload),
             nif!(b"cnif_1\0", 7, c_nif1, ERL_NIF_DIRTY_JOB_IO_BOUND),
             nif!(b"cnif_2\0", 8, c_nif1))();
-        let funcs = unsafe{slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize)};
+        let funcs = unsafe { slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize) };
 
         assert_eq!(CString::new("legacymod").unwrap().as_ref(), unsafe{CStr::from_ptr(entry.name as *const i8)} );
 
         assert_eq!(114, unsafe{entry.load.unwrap()(ptr::null_mut(), ptr::null_mut(), 0)});
         assert_eq!(None, entry.reload);
         assert_eq!(None, entry.upgrade);
-        unsafe{entry.unload.unwrap()(ptr::null_mut(), ptr::null_mut())}; // shouldn't panic or crash
+        unsafe { entry.unload.unwrap()(ptr::null_mut(), ptr::null_mut()) }; // shouldn't panic or crash
 
         assert_eq!(2, funcs.len());
 
@@ -511,7 +535,7 @@ mod initmacro_tests {
             {
                 load: unsafe_load
             })();
-        let funcs = unsafe{slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize)};
+        let funcs = unsafe { slice::from_raw_parts(entry.funcs, entry.num_of_funcs as usize) };
         assert_eq!(15, unsafe{entry.load.unwrap()(ptr::null_mut(), ptr::null_mut(), 0)});
         assert_eq!(CString::new("unsafe_nif").unwrap().as_ref(), unsafe{CStr::from_ptr(funcs[0].name as *const i8)});
         assert_eq!(3,  funcs[0].arity);
