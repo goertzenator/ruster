@@ -10,6 +10,10 @@ pub trait PrivData: Sized {
     // 	olddata.into()
     // }
     fn unload(self, _env: &ProcEnv) {}
+
+    fn get(env: &ProcEnv) -> &'static Self {
+        unsafe { &*(ens::enif_priv_data(env.as_api_ptr()) as *mut Self) }
+    }
 }
 
 
@@ -40,9 +44,4 @@ pub fn unload<T: PrivData>(penv: *mut ens::ErlNifEnv, priv_data: *mut ens::c_voi
 
     let data: Box<T> = unsafe { Box::from_raw(priv_data as *mut T) };
     data.unload(ProcEnv::from_api_ptr(penv));
-    destroy_static_atom_data();
-}
-
-pub fn internal_priv_data<T>(env: &ProcEnv) -> &'static T {
-    unsafe { &*(ens::enif_priv_data(env.as_api_ptr()) as *mut T) }
 }

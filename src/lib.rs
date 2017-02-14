@@ -331,15 +331,6 @@ pub struct StaticTerm(CTerm);
 
 pub const UNINITIALIZED_STATIC_TERM: StaticTerm = StaticTerm(0);
 
-// struct OwnedEnv {
-//  env: *mut Env,
-// }
-
-// pub struct MobileTerm {
-//  env: OwnedEnv,
-//  term: CTerm,
-// }
-
 
 use std::result;
 
@@ -374,7 +365,7 @@ impl Into<CTerm> for StaticTerm {
 
 
 
-/// StaticTerm can always be directly conerted to ScopedTerm
+// StaticTerm can always be directly converted to ScopedTerm
 impl<'e, E: Env> From<Binder<'e, E, StaticTerm>> for ScopedTerm<'e> {
     fn from(b: Binder<E, StaticTerm>) -> Self {
         ScopedTerm::new(b.val.0)
@@ -587,17 +578,18 @@ impl_simple_conversion!(u64, ens::enif_make_uint64, ens::enif_get_uint64);
 mod tuple;
 pub use tuple::*;
 
-mod binary;
-pub use binary::*;
 
-mod atom;
-pub use atom::*;
+// mod atom;
+// pub use atom::*;
 
-mod resource;
-pub use resource::*;
+// mod binary;
+// pub use binary::*;
 
-mod privdata;
-pub use privdata::*;
+// mod resource;
+// pub use resource::*;
+
+// mod privdata;
+// pub use privdata::*;
 
 
 

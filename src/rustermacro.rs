@@ -5,9 +5,17 @@
 ///
 #[macro_export]
 macro_rules! ruster_init {
-    ( $module:expr, $funcs_tt:tt) => ( ruster_init!($module, $funcs_tt, []));
-    ( $module:expr, $funcs_tt:tt, $atoms_tt:tt) => ( ruster_init!($module, $funcs_tt, $atoms_tt, $crate::DummyPrivType) );
-    ( $module:expr, $funcs_tt:tt, $atoms_tt:tt, $privtype:ty) => (
+    ( $module:expr, $funcs_tt:tt) => ( ruster_init!($module, $funcs_tt, {}));
+    ( $module:expr, $funcs_tt:tt, {$($inits:tt)* $(,)*} ) => (
+        ruster_init2!($module, $funcs_tt, parse_inits!($($inits:tt)*))
+        );
+}
+
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! ruster_init2 {
+    ( $module:expr, $funcs_tt:tt, ([$($atom_pools:ty),*], $privtype:ty) ) => (
 
         nif_init!($module, $funcs_tt, {
             load: load,
@@ -17,42 +25,69 @@ macro_rules! ruster_init {
         fn load(penv: *mut $crate::erlang_nif_sys::ErlNifEnv,
                 priv_data: *mut *mut $crate::erlang_nif_sys::c_void,
                 load_info: $crate::erlang_nif_sys::ERL_NIF_TERM) -> $crate::erlang_nif_sys::c_int {
-            $crate::init_static_atom_data(penv, atom::STATIC_ATOM_STRINGS);
-            $crate::load::<MyType>(penv, priv_data, load_info)
+            $crate::RusterStaticAtom::init(penv);
+            $($atom_pools::init(penv);)*
+            $crate::load::<$privtype>(penv, priv_data, load_info)
         }
-
-        #[allow(dead_code)]
-        fn priv_data(env: & $crate::ProcEnv) -> &'static $privtype {
-            $crate::internal_priv_data::<$privtype>(env)
-        }
-
-        impl_atoms_mod!($atoms_tt);
     )
 }
 
-// impl_atoms_mod! sample output:
-// pub mod atom {
-//     use std;
-//     use ruster::*;
-//     pub const OK: StaticAtom = StaticAtom(0);
-//     pub const ERROR: StaticAtom = StaticAtom(1);
-//     pub const ADD: StaticAtom = StaticAtom(2);
-//     pub const SUB: StaticAtom = StaticAtom(3);
-//     pub const MUL: StaticAtom = StaticAtom(4);
-//     pub const DIVISION_BY_ZERO: StaticAtom = StaticAtom(5);
-//     pub const DIV: StaticAtom = StaticAtom(6);
-//
-//     pub const static_atom_strings: &[AtomInit<'static>] = [
-//         AtomInit::Lowercase("OK"),
-//         AtomInit::Lowercase("ERROR"),
-//         AtomInit::Lowercase("ADD"),
-//         AtomInit::Lowercase("SUB"),
-//         AtomInit::Lowercase("MUL"),
-//         AtomInit::Lowercase("DIVISION_BY_ZERO"),
-//         AtomInit::Lowercase("DIV"),
-//     ];
-// }
-//
+#[doc(hidden)]
+#[macro_export]
+macro_rules! parse_inits {
+    ({$($inits:tt)*})  => ( parse_inits2!(([], $crate::DummyPrivType), {$($inits)*} ));
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! parse_inits2 {
+    ($accum:tt, { $key:ident : $val:tt } ) => (
+        parse_init!($accum, $key, $val)
+    );
+    ($accum:tt, { $key:ident : $val:tt , $($tail:tt)*} ) => (
+        parse_inits2!(parse_init!($accum, $key, $val), {$(tail)*})
+    );
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! parse_init {
+    ( ($atom_pools:tt, $privtype:ty), static_atom_types, $new_atom_pools:tt) => (
+        ($new_atom_pools, $privtype)
+    );
+    ( ($atom_pools:tt, $privtype:ty), priv_type, $new_privtype:tt) => (
+        ($atom_pools, $new_privtype)
+    );
+}
+
+/// Internal macro to deal with optional init functions.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! set_optional {
+    ($entry:ident, static_atom_types, $val:expr) => (
+        // call init for each type
+    );
+    ($entry:ident, priv_type, $val:expr) => (
+        // pass priv type to load<>
+    );
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! set_optionals {
+    ($entry:ident, $fname:ident: $val:expr, $($rest:tt)*) => (
+        set_optional!($entry, $fname, $val);
+        set_optionals!($entry, $($rest)*);
+    );
+    ($entry:ident, $fname:ident: $val:expr) => (
+        set_optional!($entry, $fname, $val);
+    );
+    //($entry:ident$($rest:tt)*) => ($($rest)*);
+    ($entry:ident,) => ();
+}
+
+
+
 #[macro_export]
 macro_rules! impl_atoms_mod {
     // strip trailing comma

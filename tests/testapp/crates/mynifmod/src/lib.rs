@@ -16,6 +16,10 @@ use ruster::{ProcEnv, ScopedTerm, StaticTerm, Binary, Resource, StaticAtom, Bind
 
 use std::cell::Cell;
 
+
+
+static_atom_pool!(MyStaticAtom, [OK, ERROR, ADD, SUB, MUL, DIVISION_BY_ZERO, DIV]);
+
 //trace_macros!(true);
 /// Create NIF module data and init function.
 ruster_init!("mynifmod",
@@ -30,8 +34,11 @@ ruster_init!("mynifmod",
               ("makeresources", 2, ruster_fn!(makeresources)),
               ("incresources", 3, ruster_fn!(incresources)),
               ("getresources", 2, ruster_fn!(getresources))],
-             [OK, ERROR, ADD, SUB, MUL, DIVISION_BY_ZERO, DIV],
-             MyType);
+            {
+                static_atom_types: [MyStaticAtom],
+                priv_type: MyType,
+            }
+             );
 
 
 struct MyType;

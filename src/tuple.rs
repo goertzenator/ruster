@@ -6,7 +6,7 @@ use super::*;
 
 impl<'a, T> Bind for &'a [T] where T: Into<CTerm> {}
 
-// conert &[Term] to Term
+//convert &[Term] to Term
 impl<'a, 'e, E: Env, T> From<Binder<'e, E, &'a [T]>> for ScopedTerm<'e>
     where T: Into<CTerm>
 {
@@ -67,7 +67,8 @@ macro_rules! impl_tuple_conversion {
         // convert tuple to [ScopedTerm;N] to ScopedTerm
         impl<'e, E:Env, $($typevars),*> From<Binder<'e, E, ($($typevars),*,)>> for ScopedTerm<'e>
             where
-            $(Binder<'e, E, $typevars> : Into<ScopedTerm<'e>>),*,
+            $(ScopedTerm<'e>: From<Binder<'e, E, $typevars>>),*,
+            //$(Binder<'e, E, $typevars> : Into<ScopedTerm<'e>>),*,
             $($typevars : Bind),*
         {
             fn from(b: Binder<'e, E, ($($typevars),*,)>) -> ScopedTerm<'e> {
