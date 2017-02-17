@@ -13,28 +13,16 @@ use std::any::{Any, TypeId};
 //
 // The ATO Resource is a generic resource type that allows any Rust type to be used with a single
 // enif_open_resource_type() registration.  The "Any" trait object is emulated with
-// a pseudo-VMT (pseudo because it is a function and not a table)
+// a pseudo-VMT (pseudo because it is a function and not a table).  This adds 1 word to
+// each resource object (Erlang itself adds 4).
 
 static mut ATO_RESOURCE: *const ens::ErlNifResourceType = 0 as *const ens::ErlNifResourceType;
 
-
+// The "layout" of resource object memory
 struct ATOWrapper<T: 'static> {
     vmtf: fn(VMTParams),
     data: T,
 }
-
-enum VMTParams {
-    Typeid(*mut TypeId),
-    Dtor(*mut ens::ErlNifEnv, *mut ens::c_void),
-}
-
-fn vmt_function<T: 'static>(params: VMTParams) {
-    match params {
-        VMTParams::Typeid(id) => unsafe { *id = TypeId::of::<T>() },
-        VMTParams::Dtor(_env, obj) => unsafe { ptr::drop_in_place(obj as *mut ATOWrapper<T>) },
-    }
-}
-
 impl<T: 'static> ATOWrapper<T> {
     fn new(data: T) -> Self {
         ATOWrapper {
@@ -43,6 +31,10 @@ impl<T: 'static> ATOWrapper<T> {
         }
     }
 
+    /// Return true if U is the same type as self.
+    ///
+    /// "T" is not available in this context; the TypeId
+    /// must be dynamically retrieved through the vmtf.
     fn is<U: 'static>(&self) -> bool {
         unsafe {
             let mut typeid = mem::uninitialized();
@@ -52,16 +44,25 @@ impl<T: 'static> ATOWrapper<T> {
     }
 }
 
-extern "C" fn ato_destructor(env: *mut ens::ErlNifEnv, objp: *mut ens::c_void) {
-    unsafe {
-        let obj: &ATOWrapper<()> = &*(objp as *const ATOWrapper<()>);
-        (obj.vmtf)(VMTParams::Dtor(env, objp));
+// The "methods" available in the pseudo-VMT.
+// More can be added when enif_select() lands.
+enum VMTParams {
+    Typeid(*mut TypeId),
+    Dtor(*mut ens::ErlNifEnv, *mut ens::c_void),
+}
+
+fn vmt_function<T: 'static>(params: VMTParams) {
+    match params {
+        VMTParams::Typeid(id) => unsafe { *id = TypeId::of::<T>() },
+        VMTParams::Dtor(_penv, obj) => unsafe { ptr::drop_in_place(obj as *mut ATOWrapper<T>) },
     }
 }
 
-pub fn init_ato(env: *mut ens::ErlNifEnv) {
+
+// ATO Resource type registration
+pub fn init_ato(penv: *mut ens::ErlNifEnv) {
     unsafe {
-        ATO_RESOURCE = ens::enif_open_resource_type(env,
+        ATO_RESOURCE = ens::enif_open_resource_type(penv,
                                                     ptr::null(),
                                                     b"Rust Any trait object\0" as *const u8,
                                                     Some(ato_destructor),
@@ -70,6 +71,21 @@ pub fn init_ato(env: *mut ens::ErlNifEnv) {
     }
 }
 
+/// ATO Resource destructor.
+///
+/// Use wrapper's vmt function pointer to invoke the actual type-specific destructor
+extern "C" fn ato_destructor(penv: *mut ens::ErlNifEnv, objp: *mut ens::c_void) {
+    unsafe {
+        let obj: &ATOWrapper<()> = &*(objp as *const ATOWrapper<()>);
+        (obj.vmtf)(VMTParams::Dtor(penv, objp));
+    }
+}
+
+
+
+
+
+
 // when enif_select() lands...
 // pub trait ErlangSelect {}
 
@@ -77,20 +93,15 @@ pub fn init_ato(env: *mut ens::ErlNifEnv) {
 
 /// A ref counting pointer to an Erlang resource
 ///
-/// A pointer
+/// Similar in functin to Arc.
 pub struct Resource<T: 'static> {
     ptr: *const ATOWrapper<T>,
     _marker: PhantomData<T>,
 }
 
-impl<T: 'static> Bind for Resource<T> {}
-impl<'a, T: 'static> Bind for &'a Resource<T> {}
-
 impl<T: 'static> Resource<T> {
     /// Create a new resource.
     ///
-    /// The type of resource created must have been previously registered with `open_resource_type`
-    /// otherwise this call will panic.  `ResourcePtr`s may live beyond the scope of any environment
     pub fn new(data: T) -> Resource<T> {
         unsafe {
             let instance: ATOWrapper<T> = ATOWrapper::new(data);
@@ -107,6 +118,9 @@ impl<T: 'static> Resource<T> {
         }
     }
 
+    /// Convert NIF resource pointer to a Resource<T>
+    ///
+    /// Returns None if the underlying type is not T.
     unsafe fn from_objp(objp: *const ens::c_void) -> Option<Resource<T>> {
         let ato_wrapper = &*(objp as *const ATOWrapper<T>);
         match ato_wrapper.is::<T>() {
@@ -121,6 +135,9 @@ impl<T: 'static> Resource<T> {
         }
     }
 
+    /// Convert NIF resource pointer to a &T
+    ///
+    /// Returns None if the underlying type is not T.
     unsafe fn ref_from_objp<'a>(objp: *const ens::c_void) -> Option<&'a T> {
         let ato_wrapper = &*(objp as *const ATOWrapper<T>);
         match ato_wrapper.is::<T>() {
@@ -164,6 +181,27 @@ impl<T: 'static> Clone for Resource<T> {
     }
 }
 
+impl<T: AsRef<[u8]>> Resource<T> {
+    /// Create binary term for this resource.
+    ///
+    /// Resources that implement AsRef<[u8]> can be converted to a term
+    /// representing a binary.  Term adds a reference count to resource
+    /// which is retracted only when the binary term is garbage collected.
+    /// The data the term refers to must not mutate.
+    pub fn as_binary_term<E: Env>(&self, env: &E) -> ScopedTerm {
+        unsafe {
+            let bin: &[u8] = self.as_ref();
+            ens::enif_make_resource_binary(
+                env.into_ptr(),
+                self.ptr as *const ens::c_void,
+                bin.as_ptr() as *const ens::c_void,
+                bin.len())
+            .into()
+        }
+    }
+}
+
+
 impl<T> Debug for Resource<T>
     where T: Debug + Any
 {
@@ -184,15 +222,27 @@ impl<T> Display for Resource<T>
 // Resource conversions
 //
 
-impl<'e, E: Env, T: 'static> TryFrom<Binder<'e, E, ScopedTerm<'e>>> for Resource<T> {
+/// Resource reference wrapper for low-cost resource retrieval.
+///
+/// Use for obtaining a low-cost resource reference to a resource term.
+/// References cannot be used directly because they cause collisions
+/// in the trait space.
+pub struct ResourceRef<'e, T:'static>(&'e T);
+
+impl<'e, T> Deref for ResourceRef<'e, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'e, E: Env, T: 'static> TryEnvFrom<ScopedTerm<'e>,E> for Resource<T> {
     type Err = Error;
-    fn try_from(b: Binder<'e, E, ScopedTerm>) -> Result<Self> {
+    fn try_efrom(term: ScopedTerm, env: &E) -> Result<Self> {
         unsafe {
             // get object pointer
-            let env = b.env;
-            let term = b.val;
             let mut objp = mem::uninitialized();
-            if 0 == ens::enif_get_resource(env.as_api_ptr(), term.into(), ATO_RESOURCE, &mut objp) {
+            if 0 == ens::enif_get_resource(env.into_ptr(), term.into(), ATO_RESOURCE, &mut objp) {
                 return Err(Error::Badarg);
             }
             Resource::<T>::from_objp(objp).ok_or(Error::Badarg)
@@ -200,40 +250,34 @@ impl<'e, E: Env, T: 'static> TryFrom<Binder<'e, E, ScopedTerm<'e>>> for Resource
     }
 }
 
-impl<'e, E: Env, T: 'static> TryFrom<Binder<'e, E, ScopedTerm<'e>>> for &'e T {
+
+//FIXME: Revisit plain reference usage when trait specialization gets better.
+
+impl<'e, E: Env, T: 'static> TryEnvFrom<ScopedTerm<'e>,E> for ResourceRef<'e,T> {
     type Err = Error;
-    fn try_from(b: Binder<'e, E, ScopedTerm>) -> Result<Self> {
+    fn try_efrom(term: ScopedTerm, env: &E) -> Result<Self> {
         unsafe {
             // get object pointer
-            let env = b.env;
-            let term = b.val;
             let mut objp = mem::uninitialized();
-            if 0 == ens::enif_get_resource(env.as_api_ptr(), term.into(), ATO_RESOURCE, &mut objp) {
+            if 0 == ens::enif_get_resource(env.into_ptr(), term.into(), ATO_RESOURCE, &mut objp) {
                 return Err(Error::Badarg);
             }
-            Resource::<T>::ref_from_objp(objp).ok_or(Error::Badarg)
+            Resource::<T>::ref_from_objp(objp).ok_or(Error::Badarg).map(|x| ResourceRef(x))
         }
     }
 }
 
-impl<'a, 'e, E: Env, T: 'static> From<Binder<'e, E, &'a Resource<T>>> for ScopedTerm<'e> {
-    fn from(b: Binder<'e, E, &Resource<T>>) -> Self {
+impl<'a, 'e, E: Env, T: 'static> EnvFrom<&'a Resource<T>, E> for ScopedTerm<'e> {
+    fn efrom(res: &'a Resource<T>, env: &E) -> Self {
         unsafe {
-            let env = b.env;
-            let res = b.val;
-            ScopedTerm::new(ens::enif_make_resource(env.as_api_ptr(),
-                                                    res.ptr as *const ens::c_void))
+            ens::enif_make_resource(env.into_ptr(),
+                                                    res.ptr as *const ens::c_void).into()
         }
     }
 }
 
-impl<'e, E: Env, T: 'static> From<Binder<'e, E, Resource<T>>> for ScopedTerm<'e> {
-    fn from(b: Binder<'e, E, Resource<T>>) -> Self {
-        unsafe {
-            let env = b.env;
-            let res = b.val;
-            ScopedTerm::new(ens::enif_make_resource(env.as_api_ptr(),
-                                                    res.ptr as *const ens::c_void))
-        }
+impl<'e, E: Env, T: 'static> EnvFrom<Resource<T>, E> for ScopedTerm<'e> {
+    fn efrom(res: Resource<T>, env: &E) -> Self {
+        EnvFrom::efrom(&res, env)
     }
 }

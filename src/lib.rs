@@ -113,7 +113,9 @@ Use of `Env` is not threadsafe, hence it lacks the `Sync` trait.
 !*/
 
 
-//#[macro_use]
+#![feature(try_from)]
+#![feature(specialization)]
+
 pub extern crate erlang_nif_sys;
 
 extern crate unreachable;
@@ -122,6 +124,9 @@ use erlang_nif_sys as ens;
 
 // required for macros to work
 pub use erlang_nif_sys as erlang_nif_sys_api;
+
+
+pub use std::convert::{TryFrom, TryInto};
 
 
 /*
@@ -150,92 +155,35 @@ mod initmacro;
 #[macro_use]
 mod rustermacro;
 
-//pub use erlang_nif_sys::ErlNifEnv as Env;
+/// Convenience names for lower level types.
+pub use erlang_nif_sys::ERL_NIF_TERM as CTerm;
+pub use erlang_nif_sys::ErlNifEnv as CEnv;
+//type PEnv = *mut CEnv;
 
 /// Trait for dealing with underlying raw NIF environment pointers.
 pub trait Env: Sized {
-    fn as_api_ptr(&self) -> *mut erlang_nif_sys::ErlNifEnv {
-        self as *const Self as *const erlang_nif_sys::ErlNifEnv as *mut erlang_nif_sys::ErlNifEnv
+
+    fn into_ptr(&self) -> *mut CEnv {
+        self as *const Self as *const CEnv as *mut CEnv
     }
 
-    fn from_api_ptr<'a>(penv: *mut erlang_nif_sys::ErlNifEnv) -> &'a Self {
+    fn from_ptr<'a>(penv: *mut CEnv) -> &'a Self {
         unsafe { &*(penv as *mut Self) }
     }
 }
 
 
+// impl<'a, T:Env> Into<*mut CEnv> for &'a T {
+//     fn into(self) -> *mut CEnv {
+//         self as *const Self as *const erlang_nif_sys::ErlNifEnv as *mut erlang_nif_sys::ErlNifEnv
+//     }
+// }
 
-/// Object that can send message to other processes.
-///
-/// Sender is created by thread_sender() and ProcEnv::sender().
-/// It contains reusable state, so it is more efficient to use
-/// a single Sender many times than to create a new Sender for each
-/// send.
-pub struct Sender {
-    context_penv: *mut ens::ErlNifEnv,
-    dirty_penv: Option<*mut ens::ErlNifEnv>,
-}
-
-impl Sender {
-    /// Create Sender from ProcEnv
-    ///
-    /// The Sender instance can send messages to other processes.
-    pub fn from_env(env: &ProcEnv) -> Sender {
-        Sender {
-            context_penv: env.as_api_ptr(),
-            dirty_penv: None,
-        }
-    }
-
-
-    /// Create Sender in non-Erlang thread.
-    ///
-    /// This function will fail if called in any BEAM scheduler thread.
-    pub fn from_thread() -> Option<Sender> {
-        let thread_type = unsafe { ens::enif_thread_type() };
-        match thread_type {
-            ens::ERL_NIF_THR_UNDEFINED => {
-                Some(Sender {
-                    context_penv: std::ptr::null_mut(),
-                    dirty_penv: None,
-                })
-            }
-            _ => None,
-        }
-    }
-
-
-    /// Send data to the designated Pid.
-    pub fn send<'e, T>(&mut self, to_pid: Pid, msg: T)
-        where Binder<'e, CopyEnv, T>: Into<ScopedTerm<'e>>,
-              T: Bind
-    {
-        unsafe {
-            // get clean msg_penv
-            let msg_penv = if self.dirty_penv.is_none() {
-                let penv = ens::enif_alloc_env();
-                self.dirty_penv = Some(penv); // not dirty just yet, but will be after enif_send()
-                penv
-            } else {
-                let penv = self.dirty_penv.unwrap();
-                ens::enif_clear_env(penv);
-                penv
-            };
-
-            // use CopyEnv to ensure any term inputs are deep-copied.
-            let msg_term: ScopedTerm = msg.bind(CopyEnv::from_api_ptr(msg_penv)).into();
-            ens::enif_send(self.context_penv, &(to_pid.0), msg_penv, msg_term.into());
-        }
-    }
-}
-
-impl Drop for Sender {
-    fn drop(&mut self) {
-        if let Some(penv) = self.dirty_penv {
-            unsafe { ens::enif_free_env(penv) };
-        }
-    }
-}
+// impl<'a, T:Env> From<*mut CEnv> for &'a T {
+//     fn from(penv: *mut CEnv) -> Self {
+//         unsafe { &*(penv as *mut Self) }
+//     }
+// }
 
 
 /// Environment type passed to user NIF functions.
@@ -260,6 +208,81 @@ impl Env for CopyEnv {}
 
 
 
+/// Object that can send message to other processes.
+///
+/// Sender is created by thread_sender() and ProcEnv::sender().
+/// It contains reusable state, so it is more efficient to use
+/// a single Sender many times than to create a new Sender for each
+/// send.
+pub struct Sender {
+    context_penv: *mut ens::ErlNifEnv,
+    dirty_penv: Option<*mut ens::ErlNifEnv>,
+}
+
+impl Sender {
+    /// Create Sender from ProcEnv
+    ///
+    /// The Sender instance can send messages to other processes.
+    pub fn from_procenv(env: &ProcEnv) -> Sender {
+        Sender {
+            context_penv: env.into_ptr(),
+            dirty_penv: None,
+        }
+    }
+
+
+    /// Create Sender in non-Erlang thread.
+    ///
+    /// This function will fail if called in any BEAM scheduler thread.
+    pub fn from_thread() -> Option<Sender> {
+        let thread_type = unsafe { ens::enif_thread_type() };
+        match thread_type {
+            ens::ERL_NIF_THR_UNDEFINED => {
+                Some(Sender {
+                    context_penv: std::ptr::null_mut(),
+                    dirty_penv: None,
+                })
+            }
+            _ => None,
+        }
+    }
+
+
+    /// Send data to the designated Pid.
+    pub fn send<'e, T>(&mut self, to_pid: Pid, msg: T)
+        where T: EnvInto<ScopedTerm<'e>, CopyEnv>
+    {
+        unsafe {
+            // get clean msg_penv
+            let msg_penv = if self.dirty_penv.is_none() {
+                let penv = ens::enif_alloc_env();
+                self.dirty_penv = Some(penv); // not dirty just yet, but will be after enif_send()
+                penv
+            } else {
+                let penv = self.dirty_penv.unwrap();
+                ens::enif_clear_env(penv);
+                penv
+            };
+
+            // use CopyEnv to ensure any term inputs are deep-copied.
+            let msg_term: ScopedTerm = msg.einto(CopyEnv::from_ptr(msg_penv));
+            ens::enif_send(self.context_penv, &(to_pid.0), msg_penv, msg_term.into());
+        }
+    }
+}
+
+impl Drop for Sender {
+    fn drop(&mut self) {
+        if let Some(penv) = self.dirty_penv {
+            unsafe { ens::enif_free_env(penv) };
+        }
+    }
+}
+
+
+
+
+
 /// A term with enclosing environment that can be live beyond a ProcEnv scope.
 ///
 ///
@@ -271,11 +294,10 @@ pub struct MobileTerm {
 
 impl MobileTerm {
     pub fn new<'e, T>(data: T) -> MobileTerm
-        where Binder<'e, CopyEnv, T>: Into<ScopedTerm<'e>>,
-              T: Bind
+        where T: EnvInto<ScopedTerm<'e>, CopyEnv>
     {
         let penv = unsafe { ens::enif_alloc_env() };
-        let term = data.bind(CopyEnv::from_api_ptr(penv)).into();
+        let term = data.einto(CopyEnv::from_ptr(penv));
         MobileTerm {
             penv: penv,
             cterm: term.into(),
@@ -290,7 +312,7 @@ impl MobileTerm {
     pub unsafe fn access<F, T>(&mut self, f: F) -> T
         where F: Fn(&NonProcEnv, &mut ScopedTerm) -> T
     {
-        f(NonProcEnv::from_api_ptr(self.penv),
+        f(NonProcEnv::from_ptr(self.penv),
           std::mem::transmute(&mut self.cterm))
     }
 }
@@ -309,8 +331,6 @@ impl Drop for MobileTerm {
 
 
 
-/// Convenience name for low level term type.
-pub use erlang_nif_sys::ERL_NIF_TERM as CTerm;
 
 
 
@@ -336,24 +356,21 @@ use std::result;
 
 
 
-impl<'a> ScopedTerm<'a> {
-    fn new(ct: CTerm) -> Self {
-        ScopedTerm(ct, std::marker::PhantomData)
-    }
-}
+// impl<'a> ScopedTerm<'a> {
+//     fn new(ct: CTerm) -> Self {
+//         ScopedTerm(ct, std::marker::PhantomData)
+//     }
+// }
 
-// impl From<ScopedTerm> for CTerm // orphan rule
 
 impl<'a> Into<CTerm> for ScopedTerm<'a> {
     fn into(self) -> CTerm {
         self.0
     }
 }
-
-
-impl StaticTerm {
-    fn new(ct: CTerm) -> Self {
-        StaticTerm(ct)
+impl<'a> From<CTerm> for ScopedTerm<'a> {
+    fn from(t: CTerm) -> Self {
+        ScopedTerm(t, std::marker::PhantomData)
     }
 }
 
@@ -362,53 +379,16 @@ impl Into<CTerm> for StaticTerm {
         self.0
     }
 }
-
-
+impl From<CTerm> for StaticTerm {
+    fn from(t: CTerm) -> Self {
+        StaticTerm(t)
+    }
+}
 
 // StaticTerm can always be directly converted to ScopedTerm
-impl<'e, E: Env> From<Binder<'e, E, StaticTerm>> for ScopedTerm<'e> {
-    fn from(b: Binder<E, StaticTerm>) -> Self {
-        ScopedTerm::new(b.val.0)
-    }
-}
-
-
-
-
-/// Temporary container type for attaching an environment to data.
-///
-/// Used in conjunction with conversions.
-pub struct Binder<'e, E: Env + 'e, T> {
-    env: &'e E,
-    val: T,
-}
-
-/// Trait for attaching an environment to data.  Use in conjunction with conversions.
-///
-/// Used in conjunction with conversions.
-pub trait Bind
-    where Self: Sized
-{
-    fn bind<'e, E: Env>(self, env: &'e E) -> Binder<E, Self> {
-        Binder {
-            env: env,
-            val: self,
-        }
-    }
-}
-
-impl<'a> Bind for ScopedTerm<'a> {}
-
-impl<'e> From<Binder<'e, ProcEnv, ScopedTerm<'e>>> for ScopedTerm<'e> {
-    fn from(b: Binder<ProcEnv, ScopedTerm<'e>>) -> Self {
-        b.val
-    }
-}
-
-impl<'e> TryFrom<Binder<'e, ProcEnv, ScopedTerm<'e>>> for ScopedTerm<'e> {
-    type Err = Error;
-    fn try_from(b: Binder<ProcEnv, ScopedTerm<'e>>) -> Result<Self> {
-        Ok(b.val)
+impl<'e> From<StaticTerm> for ScopedTerm<'e> {
+    fn from(t: StaticTerm) -> Self {
+        ScopedTerm::from(t.0)
     }
 }
 
@@ -422,31 +402,82 @@ impl<'e> TryFrom<Binder<'e, ProcEnv, ScopedTerm<'e>>> for ScopedTerm<'e> {
 // Once both these issues are resolved then this can be replaced with std::convert::TryFrom
 //
 
-pub trait TryFrom<T>: Sized {
+pub trait TryEnvFrom<T, E:Env>: Sized {
     /// The type returned in the event of a conversion error.
     type Err;
 
     /// Performs the conversion.
-    fn try_from(T) -> std::result::Result<Self, Self::Err>;
+    fn try_efrom(T, &E) -> std::result::Result<Self, Self::Err>;
 }
-pub trait TryInto<T>: Sized {
+pub trait TryEnvInto<T, E:Env>: Sized {
     /// The type returned in the event of a conversion error.
     type Err;
 
     /// Performs the conversion.
-    fn try_into(self) -> std::result::Result<T, Self::Err>;
+    fn try_einto(self, &E) -> std::result::Result<T, Self::Err>;
 }
-impl<T, U> TryInto<U> for T
-    where U: TryFrom<T>
+impl<E:Env, T, U> TryEnvInto<U, E> for T
+    where U: TryEnvFrom<T, E>
 {
     type Err = U::Err;
 
-    fn try_into(self) -> std::result::Result<U, U::Err> {
-        U::try_from(self)
+    fn try_einto(self, env: &E) -> std::result::Result<U, U::Err> {
+        U::try_efrom(self, env)
     }
 }
 
 
+
+// FIXME: This doesn't work due to inadequate trait specialization and/or poor
+// understanding on my part.  Revisit when either part improves.
+// impl<E:Env, T, U> TryEnvFrom<U,E> for T
+//     where T: TryFrom<U>
+// {
+//     type Err = T::Err;
+//     fn try_efrom(data: U, _env: &E) -> std::result::Result<Self, Self::Err> {
+//         Self::try_from(data)
+//     }
+// }
+
+
+// fn mytest(env: &ProcEnv) {
+//     let y : &[ScopedTerm] = &[];
+//     let x:std::result::Result<(),Error> = TryFrom::try_from(y);
+// //        Compiling ruster v0.0.2 (file:///home/goertzen/ruster)
+// // error[E0277]: the trait bound `(): std::convert::TryFrom<&[ScopedTerm<'_>]>` is not satisfied
+// //    --> /home/goertzen/ruster/src/lib.rs:450:43
+// //     |
+// // 450 |     let x:std::result::Result<(),Error> = TryFrom::try_from(y);
+// //     |                                           ^^^^^^^^^^^^^^^^^ the trait `std::convert::TryFrom<&[ScopedTerm<'_>]>` is not implemented for `()`
+// //     |
+// //     = note: required by `std::convert::TryFrom::try_from`
+
+// }
+
+pub trait EnvFrom<T, E:Env>: Sized {
+    /// Performs the conversion.
+    fn efrom(T, &E) -> Self;
+}
+pub trait EnvInto<T, E:Env>: Sized {
+    /// Performs the conversion.
+    fn einto(self, &E) -> T;
+}
+impl<E:Env, T, U> EnvInto<U, E> for T
+    where U: EnvFrom<T, E>
+{
+    fn einto(self, env: &E) -> U {
+        U::efrom(self, env)
+    }
+}
+
+// EnvFrom for any From.  env is ignored in this case.
+impl<E:Env,T,U> EnvFrom<T, E> for U
+    where U: From<T>
+{
+    fn efrom(data: T, _env: &E) -> Self {
+        Self::from(data)
+    }
+}
 
 
 
@@ -490,34 +521,29 @@ impl Pid {
     pub fn from_procenv(env: &ProcEnv) -> Pid {
         unsafe {
             let mut pid = std::mem::uninitialized();
-            ens::enif_self(env.as_api_ptr(), &mut pid); // won't fail; ProcEnv gaurantees valid Env type.
+            ens::enif_self(env.into_ptr(), &mut pid); // won't fail; ProcEnv gaurantees valid Env type.
             Pid(pid)
         }
     }
 
     pub fn is_alive<E: Env>(&self, env: E) -> bool {
-        unsafe { 0 != ens::enif_is_process_alive(env.as_api_ptr(), &self.0) }
+        unsafe { 0 != ens::enif_is_process_alive(env.into_ptr(), &self.0) }
     }
 }
 
-impl Bind for Pid {}
 
-impl<'e, E: Env> From<Binder<'e, E, Pid>> for ScopedTerm<'e> {
-    fn from(b: Binder<E, Pid>) -> Self {
-        let env = b.env;
-        let pid = b.val;
-        ScopedTerm::new(unsafe { ens::enif_make_pid(env.as_api_ptr(), &(pid.0)) })
+impl<'e, E: Env> EnvFrom<Pid, E> for ScopedTerm<'e> {
+    fn efrom(pid: Pid, env: &E) -> Self {
+        unsafe { ens::enif_make_pid(env.into_ptr(), &(pid.0)).into() }
     }
 }
 
-impl<'e, E: Env> TryFrom<Binder<'e, E, ScopedTerm<'e>>> for Pid {
+impl<'e, E: Env> TryEnvFrom<ScopedTerm<'e>, E> for Pid {
     type Err = Error;
-    fn try_from(b: Binder<E, ScopedTerm>) -> Result<Self> {
-        let env = b.env;
-        let term = b.val;
+    fn try_efrom(term: ScopedTerm, env: &E) -> Result<Self> {
         unsafe {
             let mut pid = std::mem::uninitialized();
-            match ens::enif_get_local_pid(env.as_api_ptr(), term.into(), &mut pid) {
+            match ens::enif_get_local_pid(env.into_ptr(), term.into(), &mut pid) {
                 0 => Err(Error::Badarg),
                 _ => Ok(Pid(pid)),
             }
@@ -532,25 +558,18 @@ impl<'e, E: Env> TryFrom<Binder<'e, E, ScopedTerm<'e>>> for Pid {
 macro_rules! impl_simple_conversion {
     ($datatype:ty, $to:expr, $from:expr) => (
 
-        impl Bind for $datatype {}
 
-        // impl<'e> EnvFrom<$datatype> for ScopedTerm<'e> {
-        //     fn envfrom<E:Env>(v: $datatype, env: &'e E) -> Self {  // 'e elided on input and output
-        //         ScopedTerm::new(  unsafe{$to(b.env.as_api_ptr(), b.val)}  )
-        //     }
-        // }
-
-        impl<'e, E:Env> From<Binder<'e, E, $datatype>> for ScopedTerm<'e> {
-            fn from(b: Binder<E, $datatype>) -> Self {  // 'e elided on input and output
-                ScopedTerm::new(  unsafe{$to(b.env.as_api_ptr(), b.val)}  )
+        impl<'e, E:Env> EnvFrom<$datatype, E> for ScopedTerm<'e> {
+            fn efrom(data: $datatype, env: &E) -> Self {  // 'e elided on input and output
+                unsafe{ $to(env.into_ptr(), data).into() }
             }
         }
 
-        impl<'a, 'e, E:Env> TryFrom<Binder<'e, E, ScopedTerm<'a>>> for $datatype {
+        impl<'a, 'e, E:Env> TryEnvFrom<ScopedTerm<'a>, E> for $datatype {
             type Err = Error;
-            fn try_from(b: Binder<E, ScopedTerm>) -> Result<Self> { // 'e elided on input, no output lifetime
+            fn try_efrom(term: ScopedTerm, env: &E) -> Result<Self> { // 'e elided on input, no output lifetime
                 let mut result = unsafe {std::mem::uninitialized()};
-                match unsafe{$from(b.env.as_api_ptr(), b.val.into(), &mut result)} {
+                match unsafe{$from(env.into_ptr(), term.into(), &mut result)} {
                     0 => Err(Error::Badarg),
                     _ => Ok(result),
                 }
@@ -579,17 +598,54 @@ mod tuple;
 pub use tuple::*;
 
 
-// mod atom;
-// pub use atom::*;
+#[macro_use]
+mod atom;
+pub use atom::*;
 
-// mod binary;
-// pub use binary::*;
+mod binary;
+pub use binary::*;
 
-// mod resource;
-// pub use resource::*;
+mod resource;
+pub use resource::*;
 
-// mod privdata;
-// pub use privdata::*;
+mod privdata;
+pub use privdata::*;
+
+
+
+static_atom_pool!(RusterStaticAtom, [OK,ERROR,UNDEFINED,TRUE,FALSE]);
+
+
+impl<'e> TryFrom<StaticTerm> for bool {
+    type Err = Error;
+    fn try_from(term: StaticTerm) -> Result<Self> {
+        let atom: RusterStaticAtom = term.try_into()?;
+        match atom {
+            TRUE => Ok(true),
+            FALSE => Ok(false),
+            _ => Err(Error::Badarg),
+        }
+    }
+}
+
+impl From<bool> for StaticTerm {
+    fn from(b: bool) -> Self {
+        let atom = match b {
+            true => TRUE,
+            false => FALSE,
+        };
+        atom.into()
+    }
+}
+
+impl<'e> From<bool> for ScopedTerm<'e> {
+    fn from(b: bool) -> Self {
+        let term = StaticTerm::from(b);
+        term.into()
+    }
+}
+
+
 
 
 

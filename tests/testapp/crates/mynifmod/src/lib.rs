@@ -1,4 +1,6 @@
-//#![feature(trace_macros)]
+#![feature(trace_macros)]
+#![feature(try_from)]
+#![feature(specialization)]
 
 // #[macro_use]
 // extern crate erlang_nif_sys;
@@ -7,8 +9,8 @@
 #[macro_use]
 extern crate ruster;
 
-use ruster::{ProcEnv, ScopedTerm, StaticTerm, Binary, Resource, StaticAtom, Binder, Error, Bind,
-             TryInto, Result, PrivData};
+use ruster::{ProcEnv, ScopedTerm, StaticTerm, Binary, Resource, ResourceRef, StaticAtom, Error,
+             EnvInto, TryEnvInto, Result, PrivData, Sender, Pid, MobileTerm};
 
 // use nif::{open_resource_type, new_binary, ResourcePtr, Error};
 // use nif::{selfpid, send_from_process};
@@ -18,12 +20,12 @@ use std::cell::Cell;
 
 
 
-static_atom_pool!(MyStaticAtom, [OK, ERROR, ADD, SUB, MUL, DIVISION_BY_ZERO, DIV]);
+static_atom_pool!(MyStaticAtom,
+                  [OK, ERROR, ADD, SUB, MUL, DIVISION_BY_ZERO, DIV]);
 
 //trace_macros!(true);
 /// Create NIF module data and init function.
-ruster_init!("mynifmod",
-             [("int", 0, ruster_fn!(int)),
+ruster_init!{ funcs: [ ("int", 0, ruster_fn!(int)),
               ("add_ints1", 2, ruster_fn!(add_ints1)),
               ("tuple1", 1, ruster_fn!(tuple1)),
               ("tuple2", 4, ruster_fn!(tuple2)),
@@ -33,12 +35,12 @@ ruster_init!("mynifmod",
               ("mathcommand", 3, ruster_fn!(mathcommand)),
               ("makeresources", 2, ruster_fn!(makeresources)),
               ("incresources", 3, ruster_fn!(incresources)),
-              ("getresources", 2, ruster_fn!(getresources))],
-            {
-                static_atom_types: [MyStaticAtom],
-                priv_type: MyType,
-            }
-             );
+              ("getresources", 2, ruster_fn!(getresources))
+              ],
+
+            static_atom_types: [MyStaticAtom],
+            priv_type: MyType,
+             }
 
 
 struct MyType;
@@ -48,49 +50,47 @@ impl PrivData for MyType {
     }
 }
 
-use atom::*;
-
 
 // fn term_scope<'e>(env: &'e ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'e>> {
 //     // ScopedTerm scope test.  Try to store term in static data.  Must not compile.
 //     static mut STATIC_TERM : Option<ScopedTerm<'static>> = None;
 //     unsafe { STATIC_TERM = Some(args[0]); }
-//     Ok(12345.bind(env).into())
+//     Ok(12345.einto(env))
 // }
 
 
 fn int<'a>(env: &'a ProcEnv, _args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    Ok(12345.bind(env).into())
+    Ok(12345.einto(env))
 }
 
 fn add_ints1<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let a: i32 = args[0].bind(env).try_into()?;
-    let b: i32 = args[1].bind(env).try_into()?;
-    Ok((a + b).bind(env).into())
+    let a: i32 = args[0].try_einto(env)?;
+    let b: i32 = args[1].try_einto(env)?;
+    Ok((a + b).einto(env))
 }
 
 
 fn tuple1<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    //Ok(12345.bind(env).into())
-    let (a, b, c, d): (i32, u32, i64, u64) = args[0].bind(env).try_into()?;
-    Ok((d, a, b, c).bind(env).into())
+    //Ok(12345.einto(env))
+    let (a, b, c, d): (i32, u32, i64, u64) = args[0].try_einto(env)?;
+    Ok((d, a, b, c).einto(env))
 }
 
 fn tuple2<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    // Ok(12345.bind(env).into())
-    let (a, b, c, d): (i32, u32, i64, u64) = args.bind(env).try_into()?;
-    Ok((b, c, d, a).bind(env).into())
+    // Ok(12345.einto(env))
+    let (a, b, c, d): (i32, u32, i64, u64) = args.try_einto(env)?;
+    Ok((b, c, d, a).einto(env))
 }
 
 fn tuple0<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    // Ok(12345.bind(env).into())
-    let (x, y): ((), ()) = args.bind(env).try_into()?;
-    Ok((x, y, ()).bind(env).into())
+    // Ok(12345.einto(env))
+    let (x, y): ((), ()) = args.try_einto(env)?;
+    Ok((x, y, ()).einto(env))
 }
 
 fn catbin<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
     // unpack args
-    let (a, b): (&[u8], &[u8]) = args.bind(env).try_into()?;
+    let (a, b): (&[u8], &[u8]) = args.try_einto(env)?;
 
     // allocate binary
     let mut bin = Binary::new(a.len() + b.len());
@@ -100,7 +100,7 @@ fn catbin<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
     bin.as_mut()[a.len()..].clone_from_slice(b);
 
     // convert to term
-    let term = bin.bind(env).into();
+    let term = bin.einto(env);
 
     //bin.as_mut()[..a.len()].clone_from_slice(a); // musn't compile
 
@@ -110,64 +110,65 @@ fn catbin<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
 
 
 fn staticatom<'p>(env: &'p ProcEnv, _args: &[ScopedTerm]) -> Result<ScopedTerm<'p>> {
-    Ok(OK.bind(env).into())
+    Ok(OK.einto(env))
 }
 
 fn mathcommand<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let t: (StaticAtom, i32, i32) = args.bind(env).try_into()?;
+    let t: (MyStaticAtom, i32, i32) = args.try_einto(env)?;
     match t {
-        (ADD, a, b) => Ok((OK, a + b).bind(env).into()),
-        (SUB, a, b) => Ok((OK, a - b).bind(env).into()),
-        (MUL, a, b) => Ok((OK, a * b).bind(env).into()),
-        (DIV, _a, 0) => Ok((ERROR, DIVISION_BY_ZERO).bind(env).into()),
-        (DIV, a, b) => Ok((OK, a / b).bind(env).into()),
+        (ADD, a, b) => Ok((OK, a + b).einto(env)),
+        (SUB, a, b) => Ok((OK, a - b).einto(env)),
+        (MUL, a, b) => Ok((OK, a * b).einto(env)),
+        (DIV, _a, 0) => Ok((ERROR, DIVISION_BY_ZERO).einto(env)),
+        (DIV, a, b) => Ok((OK, a / b).einto(env)),
         _ => Err(Error::Badarg),
     }
 }
 
 fn makeresources<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let (a, b): (i32, i32) = args.bind(env).try_into()?;
+    let (a, b): (i32, i32) = args.try_einto(env)?;
     let x = Resource::new(Cell::new(a));
     let y = Resource::new(Cell::new(b));
-    Ok((&x, y).bind(env).into())
+    Ok((&x, y).einto(env))
 }
 
 fn incresources<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let (x, y, inc): (&Cell<i32>, Resource<Cell<i32>>,  i32) = args.bind(env).try_into()?;
+    let (x, y, inc): (ResourceRef<Cell<i32>>, Resource<Cell<i32>>, i32) = args.try_einto(env)?;
     x.set(x.get() + inc);
     y.set(y.get() + inc);
-    Ok(OK.bind(env).into())
+    Ok(OK.einto(env))
 }
 
 fn getresources<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let (x, y): (&Cell<i32>, Resource<Cell<i32>>) = args.bind(env).try_into()?;
-    Ok((x.get(), y.get()).bind(env).into())
+    let (x, y): (ResourceRef<Cell<i32>>, Resource<Cell<i32>>) = args.try_einto(env)?;
+    Ok((x.get(), y.get()).einto(env))
 }
 
 
 
 fn messages<'a>(env: &'a ProcEnv, args: &[ScopedTerm]) -> Result<ScopedTerm<'a>> {
-    let (pid,) = args.bind(env).try_into()?;
-    let sender = Sender::from_procenv(env);
+    // let (pid,) = args.try_einto(env)?;
+    // let mut sender = Sender::from_procenv(env);
 
-    sender.send(pid, 1);
-    sender.send(Pid::from_procenv(env), 2);
-    sender.send(pid, Sender::from_thread.is_none());
+    // sender.send(pid, 1);
+    // sender.send(Pid::from_procenv(env), 2);
+    // sender.send(pid, Sender::from_thread().is_none());
 
-    let mt = MobileTerm((OK, pid));
+    // let mt = MobileTerm::new((OK, pid));
 
-    move || {
-        unsafe {
-            mt.run(|env, term| {
-                let sender = Sender::from_thread();
-                let (_, pid): (ScopedTerm, Pid) = term.bind(env).try_into()?;
-                sender.send(pid, 3);
-                sender.send(Pid::from_procenv(env), 4);
-                sender.send(pid, Sender::from_procenv(env));
+    // move || unsafe {
+    //     mt.run(|env, term| {
+    //         let sender = Sender::from_thread();
+    //         let (_, pid): (ScopedTerm, Pid) = term.try_einto(env)?;
+    //         sender.send(pid, 3);
+    //         sender.send(Pid::from_procenv(env), 4);
+    //         sender.send(pid, Sender::from_procenv(env));
 
-            })
-        }
-    }
+    //     })
+    // }
+
+    Ok(OK.einto(env))
+
 }
 
 

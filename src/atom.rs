@@ -6,8 +6,6 @@ use super::*;
 #[derive(PartialEq, Eq)]
 pub struct Atom<T: AsRef<str>>(T);
 
-impl<'a, T: AsRef<str>> Bind for Atom<T> {}
-
 impl<'a, T: AsRef<str>> AsRef<str> for Atom<T> {
     fn as_ref(&self) -> &str {
         self.0.as_ref()
@@ -15,37 +13,45 @@ impl<'a, T: AsRef<str>> AsRef<str> for Atom<T> {
 }
 
 
-impl<'e, E: Env, T: AsRef<str>> From<Binder<'e, E, Atom<T>>> for ScopedTerm<'e> {
-    fn from(b: Binder<'e, E, Atom<T>>) -> Self {
-        let name: &str = b.val.as_ref();
-        ScopedTerm::new(unsafe {
-            ens::enif_make_atom_len(b.env.as_api_ptr(), name.as_ptr(), name.len())
+// Not enought type strength in the underlying CTerm for this
+// impl<'e, E: Env, T: AsRef<str>, TE: From<CTerm>> EnvFrom<Atom<T>> for TE {
+//     fn from(atom: Atom<T>, env: &E) -> Self {
+//         let name: &str = atom.as_ref();
+//         From::from(unsafe {
+//             ens::enif_make_atom_len(env.into_ptr(), name.as_ptr(), name.len())
+//         })
+//     }
+// }
+
+impl<'e, E: Env, T: AsRef<str>> EnvFrom<Atom<T>, E> for ScopedTerm<'e> {
+    fn efrom(atom: Atom<T>, env: &E) -> Self {
+        let name: &str = atom.as_ref();
+        ScopedTerm::from(unsafe {
+            ens::enif_make_atom_len(env.into_ptr(), name.as_ptr(), name.len())
         })
     }
 }
 
-impl<'e, E: Env, T: AsRef<str>> From<Binder<'e, E, Atom<T>>> for StaticTerm {
-    fn from(b: Binder<'e, E, Atom<T>>) -> Self {
-        let name: &str = b.val.as_ref();
-        StaticTerm::new(unsafe {
-            ens::enif_make_atom_len(b.env.as_api_ptr(), name.as_ptr(), name.len())
+impl<E: Env, T: AsRef<str>> EnvFrom<Atom<T>, E> for StaticTerm {
+    fn efrom(atom: Atom<T>, env: &E) -> Self {
+        let name: &str = atom.as_ref();
+        StaticTerm::from(unsafe {
+            ens::enif_make_atom_len(env.into_ptr(), name.as_ptr(), name.len())
         })
     }
 }
 
 
-impl<'a, 'b, E: Env, T> TryFrom<Binder<'b, E, T>> for Atom<String>
-    where T: Into<CTerm> + Copy
-{
+
+impl<'a, 'b, E: Env, T: Into<CTerm>+Copy > TryEnvFrom<T, E> for Atom<String> {
     type Err = Error;
-    fn try_from(b: Binder<'b, E, T>) -> Result<Self> {
+    fn try_efrom(term: T, env: &E) -> Result<Self> {
         unsafe {
-
             // get atom length
             let mut length = std::mem::uninitialized();
             if 0 !=
-               ens::enif_get_atom_length(b.env.as_api_ptr(),
-                                         b.val.into(),
+               ens::enif_get_atom_length(env.into_ptr(),
+                                         term.into(),
                                          &mut length,
                                          ens::ErlNifCharEncoding::ERL_NIF_LATIN1) {
                 return Err(Error::Badarg);
@@ -55,8 +61,8 @@ impl<'a, 'b, E: Env, T> TryFrom<Binder<'b, E, T>> for Atom<String>
             let mut v = Vec::with_capacity(length as usize);
             v.set_len(length as usize);
             if 0 !=
-               ens::enif_get_atom(b.env.as_api_ptr(),
-                                  b.val.into(),
+               ens::enif_get_atom(env.into_ptr(),
+                                  term.into(),
                                   v.as_mut_ptr(),
                                   length,
                                   ens::ErlNifCharEncoding::ERL_NIF_LATIN1) {
@@ -100,9 +106,9 @@ pub trait StaticAtom: Sized + PartialEq + Eq + Copy + Clone {
         let names = Self::name_table();
         assert_eq!(atoms.len(), names.len());
         for (atom, atominit) in atoms.iter_mut().zip(names) {
-            let binder: Binder<ProcEnv, Atom<String>> = Atom(atominit.to_string()) . bind(ProcEnv::from_api_ptr(penv));
-            let term = ScopedTerm::from(binder);
-            //let term = StaticTerm::from(binder);
+            let env = ProcEnv::from_ptr(penv);
+            let term = ScopedTerm::efrom(Atom(atominit.to_string()), env);
+            //let term = StaticTerm::from(Atom(atominit.to_string()), env);
             *atom = term.into();
         }
     }
@@ -172,56 +178,56 @@ impl<'a> AtomName<'a> {
     }
 }
 
-// StaticAtom/Term conversions, also binderless conversions
 
+
+// Catch-all TryEnvFrom impl from From<> will cover this.
+// impl<'e, E: Env, A: StaticAtom> From<Binder<'e, E, A>> for StaticTerm {
+//     fn from(b: Binder<'e, E, A>) -> StaticTerm {
+//         StaticTerm::new(A::lookup(b.val))
+//     }
+// }
+
+
+
+
+// Term to StaticAtom
+// TryFrom is unstable
+// Can't catch-all impl for foreign traits.  impl in macro for concrete StaticAtom type
+// impl<TE: Into<CTerm>, A: StaticAtom> TryFrom<TE> for A
+// {
+//     type Err = Error;
+//     fn try_from(term: TE) -> Result<Self> {
+//         A::reverse_lookup(term.into())
+//     }
+// }
+
+
+
+
+// StaticAtom to Term
+// Can't catch-all impl for foreign traits.  impl in macro for concrete StaticAtom type
+// impl<TE: Into<CTerm>, A: StaticAtom> From<A> for TE {
+//     fn from(atom: A) -> TE {
+//         A::lookup(atom).into()
+//     }
+// }
 
 impl<A: StaticAtom> From<A> for StaticTerm {
-    fn from(sa: A) -> Self {
-        StaticTerm::new(A::lookup(sa))
+    fn from(atom: A) -> Self {
+        A::lookup(atom).into()
     }
 }
 
-impl<'a, T, A: StaticAtom> TryFrom<T> for A
-    where T: Into<CTerm>
-{
-    type Err = Error;
-    fn try_from(t: T) -> Result<Self> {
-        A::reverse_lookup(t.into())
-    }
-}
-
-impl<'e, E: Env, A: StaticAtom> From<Binder<'e, E, A>> for StaticTerm {
-    fn from(b: Binder<'e, E, A>) -> StaticTerm {
-        StaticTerm::new(A::lookup(b.val))
-    }
-}
-
-impl<'e, E: Env, A: StaticAtom> From<Binder<'e, E, A>> for ScopedTerm<'e> {
-    fn from(b: Binder<'e, E, A>) -> ScopedTerm<'e> {
-        ScopedTerm::new(A::lookup(b.val))
+impl<'e, A: StaticAtom> From<A> for ScopedTerm<'e> {
+    fn from(atom: A) -> Self {
+        A::lookup(atom).into()
     }
 }
 
 
-
+// Term to StaticAtom
 // This is too generic and conflicts with Resource conversion traits.
 // Moving to macro for non-generic impls
-impl<'e, E: Env, A: StaticAtom> TryFrom<Binder<'e, E, ScopedTerm<'e>>> for A
-{
-    type Err = Error;
-    fn try_from(b: Binder<'e, E, ScopedTerm>) -> Result<Self> {
-        TryFrom::try_from(b.val)
-    }
-}
-impl<'e, E: Env, A: StaticAtom> TryFrom<Binder<'e, E, StaticTerm>> for A
-{
-    type Err = Error;
-    fn try_from(b: Binder<'e, E, StaticTerm>) -> Result<Self> {
-        TryFrom::try_from(b.val)
-    }
-}
-
-
 
 
 
@@ -250,7 +256,7 @@ macro_rules! static_atom_pool {
                 static mut TABLE:[$crate::CTerm;CNT] = [0;CNT];
                 unsafe {&mut TABLE}
             }
-            fn name_table() -> &'static [AtomName<'static>] {
+            fn name_table() -> &'static [$crate::AtomName<'static>] {
                 const CNT: usize = count_tts!($($atoms)*);
                 static TABLE:[$crate::AtomName<'static>;CNT] = [$(atom_name!($atoms)),*];
                 &TABLE
@@ -265,27 +271,44 @@ macro_rules! static_atom_pool {
 
         decl_static_atoms!(0usize, $atomtype, [$($atoms),*]);
 
-        impl<'e, E: Env> TryFrom<Binder<'e, E, ScopedTerm<'e>>> for $atomtype {
+        impl<TE: Into<$crate::CTerm> > $crate::TryFrom<TE> for $atomtype
+        {
             type Err = Error;
-            fn try_from(b: Binder<'e, E, ScopedTerm>) -> Result<Self> {
-                TryFrom::try_from(b.val)
+            fn try_from(term: TE) -> Result<Self> {
+                $atomtype::reverse_lookup(term.into())
             }
         }
-        impl<'e, E: Env> TryFrom<Binder<'e, E, StaticTerm>> for $atomtype {
-            type Err = Error;
-            fn try_from(b: Binder<'e, E, StaticTerm>) -> Result<Self> {
-                TryFrom::try_from(b.val)
+
+        impl<TE: Into<$crate::CTerm>, E: $crate::Env> $crate::TryEnvFrom<TE, E> for $atomtype
+        {
+            type Err = $crate::Error;
+            fn try_efrom(term: TE, _env: &E) -> Result<Self> {
+                $atomtype::reverse_lookup(term.into())
             }
         }
+
+
+        // impl<'e, E: Env> TryFrom<Binder<'e, E, ScopedTerm<'e>>> for $atomtype {
+        //     type Err = Error;
+        //     fn try_from(b: Binder<'e, E, ScopedTerm>) -> Result<Self> {
+        //         TryFrom::try_from(b.val)
+        //     }
+        // }
+        // impl<'e, E: Env> TryFrom<Binder<'e, E, StaticTerm>> for $atomtype {
+        //     type Err = Error;
+        //     fn try_from(b: Binder<'e, E, StaticTerm>) -> Result<Self> {
+        //         TryFrom::try_from(b.val)
+        //     }
+        // }
 
     );
 }
 
-#[macro_export]
-macro_rules! atom_name {
-    ( $id:ident )               => ( $crate::AtomName::Lowercase(stringify!($id)) );
-    ( ($id:ident, $atom:expr) ) => ( $crate::AtomName::AsIs($atom) );
-}
+// #[macro_export]
+// macro_rules! atom_name {
+//     ( $id:ident )               => ( $crate::AtomName::Lowercase(stringify!($id)) );
+//     ( ($id:ident, $atom:expr) ) => ( $crate::AtomName::AsIs($atom) );
+// }
 
 // ref https://danielkeep.github.io/tlborm/book/blk-counting.html
 #[macro_export]
@@ -324,6 +347,4 @@ macro_rules! atom_name {
 }
 
 
-
-static_atom_pool!(RusterStaticAtom, [OK,ERROR,UNDEFINED,TRUE,FALSE]);
 
